@@ -1,0 +1,46 @@
+
+> nextjs_tailwind_shadcn_ts@0.1.0 dev
+> next dev 2>&1 | tee dev.log
+
+ ⚠ Port 3000 is in use, using available port 3002 instead.
+   ▲ Next.js 15.3.5
+   - Local:        http://localhost:3002
+   - Network:      http://21.0.9.41:3002
+   - Environments: .env
+
+ ✓ Starting...
+ ✓ Ready in 1750ms
+ ○ Compiling / ...
+ ✓ Compiled / in 6.3s (1121 modules)
+ GET / 200 in 7241ms
+ GET / 200 in 112ms
+ ○ Compiling /audit ...
+ ✓ Compiled /audit in 1823ms (1267 modules)
+ ✓ Compiled /_not-found in 309ms (1271 modules)
+ GET /audit 404 in 2462ms
+ ✓ Compiled /dashboard in 426ms (1290 modules)
+ ⨯ TypeError: __webpack_modules__[moduleId] is not a function
+    at __webpack_require__ (.next/server/webpack-runtime.js:33:42)
+    at eval (webpack-internal:///(ssr)/./src/components/ui/tabs.tsx:12:78)
+    at (ssr)/./src/components/ui/tabs.tsx (.next/server/app/dashboard/page.js:369:1)
+    at __webpack_require__ (.next/server/webpack-runtime.js:33:42)
+    at eval (webpack-internal:///(ssr)/./src/app/dashboard/page.tsx:15:77)
+    at (ssr)/./src/app/dashboard/page.tsx (.next/server/app/dashboard/page.js:237:1)
+    at Object.__webpack_require__ [as require] (.next/server/webpack-runtime.js:33:42)
+    at JSON.parse (<anonymous>) {
+  digest: '1791663622'
+}
+ GET /dashboard 500 in 1004ms
+ ⨯ TypeError: __webpack_modules__[moduleId] is not a function
+    at __webpack_require__ (.next/server/webpack-runtime.js:33:42)
+    at eval (webpack-internal:///(ssr)/./src/components/ui/label.tsx:9:79)
+    at (ssr)/./src/components/ui/label.tsx (.next/server/app/audit/page.js:347:1)
+    at __webpack_require__ (.next/server/webpack-runtime.js:33:42)
+    at eval (webpack-internal:///(ssr)/./src/app/audit/page.tsx:16:78)
+    at (ssr)/./src/app/audit/page.tsx (.next/server/app/audit/page.js:237:1)
+    at Object.__webpack_require__ [as require] (.next/server/webpack-runtime.js:33:42)
+    at JSON.parse (<anonymous>) {
+  digest: '1791663622'
+}
+ GET /audit 500 in 382ms
+[?25h

@@ -1,0 +1,369 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String    @id @default(cuid())
+  email             String    @unique
+  name              String?
+  password          String?
+  walletAddress     String?   @unique
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  
+  // Security fields
+  failedLoginAttempts Int?     @default(0)
+  lastFailedLogin     DateTime?
+  lockedUntil         DateTime?
+  lastLoginAt         DateTime?
+  emailVerified       Boolean   @default(false)
+  emailVerificationToken String?
+  passwordResetToken  String?
+  passwordResetExpires DateTime?
+  
+  // Team fields
+  teamId            String?
+  role              TeamRole? @default(MEMBER)
+  
+  audits        Audit[]
+  subscriptions Subscription[]
+  apiKeys       ApiKey[]
+  accounts      Account[]
+  sessions      Session[]
+  teamMemberships TeamMember[]
+  ownedTeams     Team[]       @relation("TeamOwner")
+  notifications  Notification[]
+  activities     Activity[]
+  
+  team           Team?       @relation(fields: [teamId], references: [id])
+}
+
+model Team {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  avatar      String?
+  ownerId     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  owner       User     @relation("TeamOwner", fields: [ownerId], references: [id])
+  members     TeamMember[]
+  projects    Project[]
+  invitations TeamInvitation[]
+  users       User[]
+  
+  @@index([ownerId])
+}
+
+model TeamMember {
+  id     String   @id @default(cuid())
+  teamId String
+  userId String
+  role   TeamRole @default(DEVELOPER)
+  joinedAt DateTime @default(now())
+  
+  team   Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+}
+
+model TeamInvitation {
+  id     String   @id @default(cuid())
+  teamId String
+  email  String
+  role   TeamRole @default(DEVELOPER)
+  token  String   @unique
+  acceptedAt DateTime?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  invitedBy String
+  
+  team   Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  
+  @@index([teamId])
+  @@index([email])
+  @@index([token])
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  teamId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  audits      Audit[]
+  
+  @@index([teamId])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+  data      String?          // JSON data
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([read])
+  @@index([type])
+}
+
+model Activity {
+  id        String       @id @default(cuid())
+  userId    String
+  action    ActivityType
+  target    String?      // Target entity ID
+  metadata  String?      // JSON metadata
+  createdAt DateTime     @default(now())
+  
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Contract {
+  id          String   @id @default(cuid())
+  address     String?
+  name        String
+  sourceCode  String
+  bytecode    String?
+  abi         String?
+  compilerVersion String?
+  optimizationEnabled Boolean? @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  audits      Audit[]
+}
+
+model Audit {
+  id              String   @id @default(cuid())
+  userId          String
+  contractId      String
+  projectId       String?
+  status          AuditStatus @default(PENDING)
+  overallScore    Int?     // 0-100 security score
+  riskLevel       RiskLevel? @default(UNKNOWN)
+  auditDuration   Int?     // Duration in seconds
+  cost            Float?   // Cost in credits/USD
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contract        Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  project         Project? @relation(fields: [projectId], references: [id])
+  vulnerabilities  Vulnerability[]
+  reports         AuditReport[]
+  
+  @@index([userId])
+  @@index([contractId])
+  @@index([projectId])
+  @@index([status])
+}
+
+model Vulnerability {
+  id              String   @id @default(cuid())
+  auditId         String
+  title           String
+  description     String
+  severity        Severity
+  category        String   // e.g., "Reentrancy", "Access Control", etc.
+  lineNumbers     String?  // JSON array of line numbers
+  codeSnippet     String?
+  recommendation  String
+  cweId           String?  // Common Weakness Enumeration ID
+  swcId           String?  // Smart Contract Weakness Classification ID
+  createdAt       DateTime @default(now())
+  
+  audit           Audit    @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  
+  @@index([auditId])
+  @@index([severity])
+}
+
+model AuditReport {
+  id              String   @id @default(cuid())
+  auditId         String
+  reportType      ReportType @default(FULL)
+  content         String   // JSON content of the report
+  ipfsHash        String?  // IPFS hash for decentralized storage
+  blockchainTxHash String? // Transaction hash for blockchain proof
+  createdAt       DateTime @default(now())
+  
+  audit           Audit    @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  
+  @@index([auditId])
+}
+
+model ApiKey {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  hashedKey   String   @unique
+  keyPrefix   String   // First 8 characters for identification
+  permissions String   // JSON array of permissions
+  isActive    Boolean  @default(true)
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+  @@index([hashedKey])
+}
+
+model Subscription {
+  id              String   @id @default(cuid())
+  userId          String
+  plan            SubscriptionPlan @default(FREE)
+  status          SubscriptionStatus @default(ACTIVE)
+  creditsRemaining Int     @default(0)
+  stripeCustomerId String?
+  stripeSubscriptionId String?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+}
+
+enum TeamRole {
+  OWNER
+  ADMIN  
+  DEVELOPER
+  VIEWER
+  MEMBER
+}
+
+enum NotificationType {
+  AUDIT_COMPLETED
+  AUDIT_FAILED
+  TEAM_INVITATION
+  CREDIT_LOW
+  SECURITY_ALERT
+  SYSTEM_UPDATE
+  COMMENT_ADDED
+  MENTION
+}
+
+enum ActivityType {
+  AUDIT_STARTED
+  AUDIT_COMPLETED
+  TEAM_CREATED
+  TEAM_JOINED
+  PROJECT_CREATED
+  COMMENT_ADDED
+  VULNERABILITY_FOUND
+  REPORT_GENERATED
+}
+
+enum AuditStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum RiskLevel {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFO
+  UNKNOWN
+}
+
+enum Severity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFO
+}
+
+enum ReportType {
+  SUMMARY
+  FULL
+  TECHNICAL
+}
+
+enum SubscriptionPlan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+  PENDING
+}
