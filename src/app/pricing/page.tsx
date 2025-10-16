@@ -8,6 +8,7 @@ import { Check, Star, Zap, Shield, Crown } from 'lucide-react'
 import { useSession } from 'next-auth/react'
 import { toast } from 'sonner'
 import { BasePayButton } from '@/components/base-pay-button'
+import { CDPPayButton } from '@/components/cdp-pay-button'
 
 const plans = [
   {
@@ -250,17 +251,31 @@ export default function PricingPage() {
                         </div>
                       </div>
                       
-                      <BasePayButton
-                        amount={plan.price.replace('$', '')}
-                        planName={plan.name}
-                        className="w-full"
-                        onSuccess={(paymentId) => {
-                          toast.success(`Payment successful! Plan activated.`)
-                        }}
-                        onError={(error) => {
-                          toast.error(`Payment failed: ${error}`)
-                        }}
-                      />
+                      <div className="space-y-2">
+                        <BasePayButton
+                          amount={adjustedPrice.replace('$', '')}
+                          planName={plan.name}
+                          className="w-full"
+                          onSuccess={(paymentId) => {
+                            toast.success(`Payment successful! Plan activated.`)
+                          }}
+                          onError={(error) => {
+                            toast.error(`Payment failed: ${error}`)
+                          }}
+                        />
+                        
+                        <CDPPayButton
+                          amount={adjustedPrice.replace('$', '')}
+                          planName={plan.name}
+                          className="w-full"
+                          onSuccess={(transactionHash) => {
+                            toast.success(`Payment successful! Plan activated.`)
+                          }}
+                          onError={(error) => {
+                            toast.error(`Payment failed: ${error}`)
+                          }}
+                        />
+                      </div>
                     </>
                   )}
                 </CardFooter>

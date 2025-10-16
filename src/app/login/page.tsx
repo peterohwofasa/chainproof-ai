@@ -12,6 +12,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Shield, Mail, Lock, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { BaseSignInButton } from '@/components/auth/base-signin-button'
+import { CDPSignInButton } from '@/components/auth/cdp-signin-button'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -135,7 +136,7 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div className="mt-6">
+            <div className="mt-6 space-y-3">
               <BaseSignInButton 
                 className="w-full"
                 onSuccess={() => {
@@ -143,6 +144,16 @@ export default function LoginPage() {
                 }}
                 onError={(error) => {
                   toast.error(`Base connection failed: ${error}`)
+                }}
+              />
+              
+              <CDPSignInButton 
+                className="w-full"
+                onSuccess={() => {
+                  toast.success('Successfully connected with CDP!')
+                }}
+                onError={(error) => {
+                  toast.error(`CDP connection failed: ${error}`)
                 }}
               />
             </div>

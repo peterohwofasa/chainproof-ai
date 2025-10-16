@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Navigation } from "@/components/navigation";
 import { Footer } from "@/components/layout/footer";
 import { SessionProviderWrapper } from "@/components/session-provider";
+import { CDPWalletProvider } from "@/components/cdp-wallet-provider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -46,10 +47,12 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
         <SessionProviderWrapper>
-          <Navigation />
-          {children}
-          <Footer />
-          <Toaster />
+          <CDPWalletProvider>
+            <Navigation />
+            {children}
+            <Footer />
+            <Toaster />
+          </CDPWalletProvider>
         </SessionProviderWrapper>
       </body>
     </html>
