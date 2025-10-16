@@ -45,7 +45,14 @@ export async function GET(request: NextRequest) {
           gte: startDate
         }
       },
-      include: {
+      select: {
+        id: true,
+        status: true,
+        overallScore: true,
+        riskLevel: true,
+        createdAt: true,
+        completedAt: true,
+        auditDuration: true,
         user: {
           select: {
             name: true,

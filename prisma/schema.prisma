@@ -46,8 +46,15 @@ model User {
   notifications  Notification[]
   activities     Activity[]
   payments       Payment[]
+  projects       Project[]
   
   team           Team?       @relation(fields: [teamId], references: [id])
+  
+  // Performance indexes
+  @@index([emailVerified])
+  @@index([teamId])
+  @@index([createdAt])
+  @@index([lastLoginAt])
 }
 
 model Team {
@@ -105,14 +112,22 @@ model Project {
   id          String   @id @default(cuid())
   name        String
   description String?
-  teamId      String
+  userId      String
+  teamId      String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
-  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  team        Team?    @relation(fields: [teamId], references: [id])
+  contracts   Contract[]
   audits      Audit[]
   
+  // Performance indexes
+  @@index([userId])
   @@index([teamId])
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([teamId, createdAt])
 }
 
 model Notification {
@@ -130,6 +145,10 @@ model Notification {
   @@index([userId])
   @@index([read])
   @@index([type])
+  @@index([createdAt])
+  @@index([userId, read])
+  @@index([userId, createdAt])
+  @@index([userId, type])
 }
 
 model Activity {
@@ -145,6 +164,8 @@ model Activity {
   @@index([userId])
   @@index([action])
   @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
 }
 
 model Account {
@@ -191,10 +212,14 @@ model Contract {
   abi         String?
   compilerVersion String?
   optimizationEnabled Boolean? @default(false)
+  projectId   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
   audits      Audit[]
+  project     Project? @relation(fields: [projectId], references: [id])
+  
+  @@index([projectId])
 }
 
 model Audit {
@@ -222,10 +247,23 @@ model Audit {
   reports         AuditReport[]
   payments        Payment[]
   
+  // Single column indexes
   @@index([userId])
   @@index([contractId])
   @@index([projectId])
   @@index([status])
+  @@index([auditType])
+  @@index([riskLevel])
+  @@index([createdAt])
+  @@index([completedAt])
+  
+  // Composite indexes for common query patterns
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([projectId, status])
+  @@index([auditType, status])
+  @@index([riskLevel, status])
 }
 
 model Vulnerability {
@@ -244,8 +282,18 @@ model Vulnerability {
   
   audit           Audit    @relation(fields: [auditId], references: [id], onDelete: Cascade)
   
+  // Single column indexes
   @@index([auditId])
   @@index([severity])
+  @@index([category])
+  @@index([createdAt])
+  @@index([cweId])
+  @@index([swcId])
+  
+  // Composite indexes for common query patterns
+  @@index([auditId, severity])
+  @@index([severity, category])
+  @@index([category, createdAt])
 }
 
 model AuditReport {
@@ -266,19 +314,20 @@ model ApiKey {
   id          String   @id @default(cuid())
   userId      String
   name        String
-  hashedKey   String   @unique
-  keyPrefix   String   // First 8 characters for identification
-  permissions String   // JSON array of permissions
+  key         String   @unique
   isActive    Boolean  @default(true)
   lastUsedAt  DateTime?
-  expiresAt   DateTime?
   createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  expiresAt   DateTime?
   
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   
+  // Performance indexes
   @@index([userId])
-  @@index([hashedKey])
+  @@index([isActive])
+  @@index([expiresAt])
+  @@index([lastUsedAt])
+  @@index([userId, isActive])
 }
 
 model Subscription {
@@ -298,6 +347,7 @@ model Subscription {
   updatedAt       DateTime @updatedAt
   
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments        Payment[]
   
   @@index([userId])
 }
@@ -306,24 +356,26 @@ model Payment {
   id              String   @id @default(cuid())
   userId          String
   auditId         String?
-  amount          Float    // Amount in ETH or token units
-  currency        String   @default("ETH")
-  transactionHash String   @unique
-  walletAddress   String
-  recipientAddress String
+  subscriptionId  String?
+  amount          Float
+  currency        String   @default("USD")
   status          PaymentStatus @default(PENDING)
-  paymentMethod   PaymentMethod @default(CDP_WALLET)
-  metadata        String?  // JSON metadata for additional payment data
+  stripePaymentId String?  @unique
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  audit           Audit?   @relation(fields: [auditId], references: [id])
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  audit           Audit?       @relation(fields: [auditId], references: [id])
+  subscription    Subscription? @relation(fields: [subscriptionId], references: [id])
   
+  // Performance indexes
   @@index([userId])
   @@index([auditId])
-  @@index([transactionHash])
+  @@index([subscriptionId])
   @@index([status])
+  @@index([createdAt])
+  @@index([userId, status])
+  @@index([status, createdAt])
 }
 
 enum TeamRole {
@@ -416,4 +468,32 @@ enum PaymentMethod {
   CDP_WALLET
   BASE_PAY
   STRIPE
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  eventType   String   // AuditEventType enum values
+  severity    String   // AuditSeverity enum values
+  userId      String?
+  sessionId   String?
+  ipAddress   String?
+  userAgent   String?
+  resource    String?
+  action      String?
+  details     String?  // JSON details
+  metadata    String?  // JSON metadata
+  timestamp   DateTime @default(now())
+  createdAt   DateTime @default(now())
+  
+  // Performance indexes
+  @@index([eventType])
+  @@index([severity])
+  @@index([userId])
+  @@index([ipAddress])
+  @@index([timestamp])
+  @@index([createdAt])
+  @@index([eventType, severity])
+  @@index([userId, timestamp])
+  @@index([ipAddress, timestamp])
+  @@index([severity, timestamp])
 }

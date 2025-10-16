@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { config } from './config';
 import { logger } from './logger';
 import { RateLimitError } from './error-handler';
+import { redisRateLimiter, withRedisRateLimit, withRedisAuthRateLimit, withRedisAuditRateLimit, withRedisUploadRateLimit } from './rate-limiter-redis';
 
 // Define a default config in case import fails
 const defaultConfig = {
@@ -58,6 +59,26 @@ class RateLimiter {
     return `ip:${ip}`;
   }
 
+  async checkLimitRedis(
+    request: NextRequest,
+    customLimit?: number,
+    customWindow?: number,
+    endpoint?: string
+  ): Promise<{ allowed: boolean; remaining: number; resetTime: number }> {
+    try {
+      // Try Redis first
+      return await redisRateLimiter.checkLimit(request, customLimit, customWindow, endpoint);
+    } catch (error) {
+      if (error instanceof RateLimitError) {
+        throw error;
+      }
+      
+      // Fallback to in-memory if Redis fails
+      logger.warn('Redis rate limiter failed, falling back to in-memory', { error });
+      return this.checkLimit(request, customLimit, customWindow, endpoint);
+    }
+  }
+
   checkLimit(
     request: NextRequest,
     customLimit?: number,
@@ -110,16 +131,52 @@ class RateLimiter {
   }
 
   // Different rate limits for different endpoints
+  async checkAuthLimitRedis(request: NextRequest): Promise<{ allowed: boolean; remaining: number; resetTime: number }> {
+    try {
+      return await redisRateLimiter.checkAuthLimit(request);
+    } catch (error) {
+      if (error instanceof RateLimitError) {
+        throw error;
+      }
+      logger.warn('Redis auth rate limiter failed, falling back to in-memory', { error });
+      return this.checkAuthLimit(request);
+    }
+  }
+
+  async checkAuditLimitRedis(request: NextRequest): Promise<{ allowed: boolean; remaining: number; resetTime: number }> {
+    try {
+      return await redisRateLimiter.checkAuditLimit(request);
+    } catch (error) {
+      if (error instanceof RateLimitError) {
+        throw error;
+      }
+      logger.warn('Redis audit rate limiter failed, falling back to in-memory', { error });
+      return this.checkAuditLimit(request);
+    }
+  }
+
+  async checkUploadLimitRedis(request: NextRequest): Promise<{ allowed: boolean; remaining: number; resetTime: number }> {
+    try {
+      return await redisRateLimiter.checkUploadLimit(request);
+    } catch (error) {
+      if (error instanceof RateLimitError) {
+        throw error;
+      }
+      logger.warn('Redis upload rate limiter failed, falling back to in-memory', { error });
+      return this.checkUploadLimit(request);
+    }
+  }
+
   checkAuthLimit(request: NextRequest): { allowed: boolean; remaining: number; resetTime: number } {
-    return this.checkLimit(request, 5, 15 * 60 * 1000, 'auth'); // 5 requests per 15 minutes
+    return this.checkLimit(request, 10, 900, 'auth'); // 10 requests per 15 minutes
   }
 
   checkAuditLimit(request: NextRequest): { allowed: boolean; remaining: number; resetTime: number } {
-    return this.checkLimit(request, 10, 60 * 60 * 1000, 'audit'); // 10 requests per hour
+    return this.checkLimit(request, 5, 3600, 'audit'); // 5 audits per hour
   }
 
   checkUploadLimit(request: NextRequest): { allowed: boolean; remaining: number; resetTime: number } {
-    return this.checkLimit(request, 3, 60 * 60 * 1000, 'upload'); // 3 uploads per hour
+    return this.checkLimit(request, 20, 3600, 'upload'); // 20 uploads per hour
   }
 
   // Get current status for a user/IP
@@ -178,43 +235,98 @@ class RateLimiter {
 // Singleton instance
 export const rateLimiter = new RateLimiter();
 
-// Middleware function for API routes
-export function withRateLimit(
-  handler: (request: NextRequest, ...args: any[]) => Promise<Response>,
-  options?: {
-    customLimit?: number;
-    customWindow?: number;
-    endpoint?: string;
-    skipAuthCheck?: boolean;
-  }
-) {
-  return async (request: NextRequest, ...args: any[]) => {
-    try {
-      // Check rate limit
-      const result = options?.customLimit 
-        ? rateLimiter.checkLimit(request, options.customLimit, options.customWindow, options.endpoint)
-        : rateLimiter.checkLimit(request, undefined, undefined, options?.endpoint);
+// Export Redis rate limiting functions for direct use
+export { withRedisRateLimit, withRedisAuthRateLimit, withRedisAuditRateLimit, withRedisUploadRateLimit };
 
-      // Add rate limit headers to response
-      const response = await handler(request, ...args);
+// Redis-first middleware function for API routes
+export function withRateLimitRedis(
+  handler: (req: NextRequest) => Promise<Response>,
+  customLimit?: number,
+  customWindow?: number,
+  endpoint?: string
+) {
+  return async (req: NextRequest): Promise<Response> => {
+    try {
+      // Try Redis first, fallback to in-memory
+      const result = await rateLimiter.checkLimitRedis(req, customLimit, customWindow, endpoint);
       
-      if (response instanceof Response) {
-        response.headers.set('X-RateLimit-Limit', options?.customLimit?.toString() || safeConfig.RATE_LIMIT_MAX_REQUESTS.toString());
-        response.headers.set('X-RateLimit-Remaining', result.remaining.toString());
-        // Ensure resetTime is a valid number before creating Date
-        if (result.resetTime && typeof result.resetTime === 'number' && !isNaN(result.resetTime) && result.resetTime > 0) {
-          try {
-            response.headers.set('X-RateLimit-Reset', new Date(result.resetTime).toISOString());
-          } catch (error) {
-            // If date conversion fails, skip setting this header
-            console.warn('Failed to set X-RateLimit-Reset header:', error);
+      if (!result.allowed) {
+        return new Response(
+          JSON.stringify({
+            error: 'Rate limit exceeded',
+            resetTime: result.resetTime,
+            remaining: result.remaining
+          }),
+          {
+            status: 429,
+            headers: {
+              'Content-Type': 'application/json',
+              'X-RateLimit-Limit': String(customLimit || safeConfig.RATE_LIMIT_MAX_REQUESTS),
+              'X-RateLimit-Remaining': String(result.remaining),
+              'X-RateLimit-Reset': String(result.resetTime),
+              'Retry-After': String(Math.ceil((result.resetTime - Date.now()) / 1000))
+            }
           }
-        }
+        );
       }
 
+      // Add rate limit headers to successful responses
+      const response = await handler(req);
+      response.headers.set('X-RateLimit-Limit', String(customLimit || safeConfig.RATE_LIMIT_MAX_REQUESTS));
+      response.headers.set('X-RateLimit-Remaining', String(result.remaining));
+      response.headers.set('X-RateLimit-Reset', String(result.resetTime));
+      
       return response;
     } catch (error) {
-      throw error;
+      logger.error('Rate limiting error:', error);
+      // If rate limiting fails, allow the request to proceed
+      return handler(req);
+    }
+  };
+}
+
+// Middleware function for API routes (in-memory fallback)
+export function withRateLimit(
+  handler: (req: NextRequest) => Promise<Response>,
+  customLimit?: number,
+  customWindow?: number,
+  endpoint?: string
+) {
+  return async (req: NextRequest): Promise<Response> => {
+    try {
+      const result = rateLimiter.checkLimit(req, customLimit, customWindow, endpoint);
+      
+      if (!result.allowed) {
+        return new Response(
+          JSON.stringify({
+            error: 'Rate limit exceeded',
+            resetTime: result.resetTime,
+            remaining: result.remaining
+          }),
+          {
+            status: 429,
+            headers: {
+              'Content-Type': 'application/json',
+              'X-RateLimit-Limit': String(customLimit || safeConfig.RATE_LIMIT_MAX_REQUESTS),
+              'X-RateLimit-Remaining': String(result.remaining),
+              'X-RateLimit-Reset': String(result.resetTime),
+              'Retry-After': String(Math.ceil((result.resetTime - Date.now()) / 1000))
+            }
+          }
+        );
+      }
+
+      // Add rate limit headers to successful responses
+      const response = await handler(req);
+      response.headers.set('X-RateLimit-Limit', String(customLimit || safeConfig.RATE_LIMIT_MAX_REQUESTS));
+      response.headers.set('X-RateLimit-Remaining', String(result.remaining));
+      response.headers.set('X-RateLimit-Reset', String(result.resetTime));
+      
+      return response;
+    } catch (error) {
+      logger.error('Rate limiting error:', error);
+      // If rate limiting fails, allow the request to proceed
+      return handler(req);
     }
   };
 }

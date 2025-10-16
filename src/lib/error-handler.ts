@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { logger } from './logger';
+import { errorMonitoring } from './error-monitoring';
 
 export class AppError extends Error {
   public statusCode: number;
@@ -41,8 +42,11 @@ export class NotFoundError extends AppError {
 }
 
 export class RateLimitError extends AppError {
-  constructor(message: string = 'Rate limit exceeded') {
+  public details?: any;
+  
+  constructor(message: string = 'Rate limit exceeded', details?: any) {
     super(message, 429, true, 'RATE_LIMIT_EXCEEDED');
+    this.details = details;
   }
 }
 
@@ -59,12 +63,35 @@ export class ExternalServiceError extends AppError {
 }
 
 // Global error handler for API routes
-export function handleApiError(error: any, request?: NextRequest): NextResponse {
+export async function handleApiError(error: any, request?: NextRequest): Promise<NextResponse> {
   // Generate unique request ID for tracking
   const requestId = generateRequestId();
   
-  // Log the error
+  // Extract user context from request
+  const userId = await getUserIdFromRequest(request);
+  const sessionId = await getSessionIdFromRequest(request);
+  
+  // Track error with comprehensive monitoring
+  const errorId = await errorMonitoring.trackError(error, {
+    userId,
+    sessionId,
+    requestId,
+    url: request?.url,
+    method: request?.method,
+    userAgent: request?.headers.get('user-agent') || undefined,
+    ip: getClientIP(request),
+    severity: determineSeverityFromError(error),
+    tags: generateErrorTags(error, request),
+    additionalContext: {
+      headers: Object.fromEntries(request?.headers.entries() || []),
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV
+    }
+  });
+
+  // Log the error with enhanced context
   logger.error('API Error occurred', {
+    errorId,
     error: {
       name: error.name,
       message: error.message,
@@ -76,7 +103,7 @@ export function handleApiError(error: any, request?: NextRequest): NextResponse 
     method: request?.method,
     userAgent: request?.headers.get('user-agent'),
     ip: getClientIP(request)
-  }, undefined, requestId);
+  }, userId, requestId);
 
   // Don't leak error details in production
   const isDevelopment = process.env.NODE_ENV !== 'production';
@@ -89,7 +116,8 @@ export function handleApiError(error: any, request?: NextRequest): NextResponse 
           message: error.message,
           code: error.code,
           ...(isDevelopment && { stack: error.stack }),
-          requestId
+          requestId,
+          errorId
         }
       },
       { status: error.statusCode }
@@ -104,7 +132,8 @@ export function handleApiError(error: any, request?: NextRequest): NextResponse 
         message: isDevelopment ? error.message : 'Internal server error',
         code: 'INTERNAL_SERVER_ERROR',
         ...(isDevelopment && { stack: error.stack }),
-        requestId
+        requestId,
+        errorId
       }
     },
     { status: 500 }
@@ -117,9 +146,101 @@ export function withErrorHandler(handler: (request: NextRequest, ...args: any[])
     try {
       return await handler(request, ...args);
     } catch (error) {
-      return handleApiError(error, request);
+      return await handleApiError(error, request);
     }
   };
+}
+
+// Helper functions for error context extraction
+async function getUserIdFromRequest(request?: NextRequest): Promise<string | undefined> {
+  if (!request) return undefined;
+  
+  try {
+    // Try to get user ID from JWT token
+    const { getToken } = await import('next-auth/jwt');
+    const token = await getToken({ req: request });
+    return token?.sub || token?.userId;
+  } catch (error) {
+    // Fallback to header or other methods
+    return request.headers.get('x-user-id') || undefined;
+  }
+}
+
+async function getSessionIdFromRequest(request?: NextRequest): Promise<string | undefined> {
+  if (!request) return undefined;
+  
+  try {
+    // Try to get session ID from cookies or headers
+    const sessionCookie = request.cookies.get('next-auth.session-token') || 
+                         request.cookies.get('__Secure-next-auth.session-token');
+    return sessionCookie?.value || request.headers.get('x-session-id') || undefined;
+  } catch (error) {
+    return undefined;
+  }
+}
+
+function determineSeverityFromError(error: any): 'low' | 'medium' | 'high' | 'critical' {
+  // Critical errors
+  if (error instanceof DatabaseError || 
+      error instanceof ExternalServiceError ||
+      error.statusCode >= 500) {
+    return 'critical';
+  }
+  
+  // High severity errors
+  if (error instanceof AuthenticationError ||
+      error instanceof AuthorizationError ||
+      error.statusCode === 401 || error.statusCode === 403) {
+    return 'high';
+  }
+  
+  // Medium severity errors
+  if (error instanceof ValidationError ||
+      error instanceof RateLimitError ||
+      error.statusCode >= 400) {
+    return 'medium';
+  }
+  
+  // Default to low
+  return 'low';
+}
+
+function generateErrorTags(error: any, request?: NextRequest): string[] {
+  const tags: string[] = [];
+  
+  // Add error type tag
+  tags.push(`error_type:${error.constructor.name}`);
+  
+  // Add HTTP method tag
+  if (request?.method) {
+    tags.push(`method:${request.method.toLowerCase()}`);
+  }
+  
+  // Add route tag (simplified)
+  if (request?.url) {
+    try {
+      const url = new URL(request.url);
+      const pathSegments = url.pathname.split('/').filter(Boolean);
+      if (pathSegments.length > 0) {
+        tags.push(`route:${pathSegments[0]}`);
+        if (pathSegments.length > 1) {
+          tags.push(`endpoint:${pathSegments.slice(0, 2).join('/')}`);
+        }
+      }
+    } catch (e) {
+      // Ignore URL parsing errors
+    }
+  }
+  
+  // Add status code tag
+  if (error.statusCode) {
+    tags.push(`status:${error.statusCode}`);
+  }
+  
+  // Add environment tag
+  tags.push(`env:${process.env.NODE_ENV || 'unknown'}`);
+  
+  return tags;
 }
 
 // Utility functions
@@ -127,10 +248,12 @@ function generateRequestId(): string {
   return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
-function getClientIP(request?: NextRequest): string {
-  if (!request) return 'unknown';
+function getClientIP(request?: NextRequest): string | undefined {
+  if (!request) return undefined;
   
-  return request.headers.get('x-forwarded-for') ||
+  return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
          request.headers.get('x-real-ip') ||
-         'unknown';
+         request.headers.get('cf-connecting-ip') ||
+         request.ip ||
+         undefined;
 }

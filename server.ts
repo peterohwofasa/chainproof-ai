@@ -1,7 +1,5 @@
-// server.ts - Next.js Standalone + Socket.IO
-import { setupSocket } from '@/lib/socket';
+// server.ts - Next.js Standalone Server
 import { createServer } from 'http';
-import { Server } from 'socket.io';
 import { config } from '@/lib/config';
 import { logger } from '@/lib/logger';
 import { addSecurityHeaders } from '@/lib/security';
@@ -11,7 +9,7 @@ const dev = process.env.NODE_ENV !== 'production';
 const currentPort = config.PORT;
 const hostname = config.HOST;
 
-// Custom server with Socket.IO integration
+// Custom server for enhanced security and logging
 async function createCustomServer() {
   try {
     // Create Next.js app
@@ -25,13 +23,8 @@ async function createCustomServer() {
     await nextApp.prepare();
     const handle = nextApp.getRequestHandler();
 
-    // Create HTTP server that will handle both Next.js and Socket.IO
+    // Create HTTP server with security headers
     const server = createServer((req, res) => {
-      // Skip socket.io requests from Next.js handler
-      if (req.url?.startsWith('/api/socketio')) {
-        return;
-      }
-
       // Add security headers to all responses
       const originalWrite = res.write;
       const originalEnd = res.end;
@@ -49,25 +42,13 @@ async function createCustomServer() {
       handle(req, res);
     });
 
-    // Setup Socket.IO with proper CORS
-    const io = new Server(server, {
-      path: '/api/socketio',
-      cors: {
-        origin: config.ALLOWED_ORIGINS,
-        methods: ["GET", "POST"],
-        credentials: true
-      }
-    });
-
-    setupSocket(io);
-
     // Start the server
     server.listen(currentPort, hostname, () => {
       logger.info(`Server started successfully`, {
         url: `http://${hostname}:${currentPort}`,
-        socketUrl: `ws://${hostname}:${currentPort}/api/socketio`,
         environment: config.NODE_ENV,
-        allowedOrigins: config.ALLOWED_ORIGINS
+        allowedOrigins: config.ALLOWED_ORIGINS,
+        realTimeUpdates: 'Server-Sent Events (SSE)'
       });
     });
 

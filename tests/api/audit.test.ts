@@ -103,11 +103,16 @@ jest.mock('@/lib/error-handler', () => ({
   },
 }))
 
-// Mock Socket.IO
-jest.mock('@/lib/socket', () => ({
+// Mock SSE functions
+jest.mock('@/lib/sse', () => ({
   emitAuditProgress: jest.fn(),
   emitAuditCompleted: jest.fn(),
   emitAuditError: jest.fn(),
+  addSSEConnection: jest.fn(),
+  removeSSEConnection: jest.fn(),
+  getConnectionCount: jest.fn(),
+  getActiveAudits: jest.fn(),
+  cleanupConnections: jest.fn(),
 }))
 
 // Mock z-ai-web-dev-sdk

@@ -6,6 +6,7 @@ import { config } from '@/lib/config';
 import { databaseBackup } from '@/lib/backup';
 import { rateLimiter } from '@/lib/rate-limiter';
 import { redisClient } from '@/lib/redis';
+import { healthCheckService } from '@/lib/health-check';
 
 interface HealthCheck {
   status: 'healthy' | 'degraded' | 'unhealthy';
@@ -197,8 +198,33 @@ function getOverallStatus(services: HealthCheck['services']): 'healthy' | 'degra
 export const GET = withErrorHandler(async (request: NextRequest) => {
   const start = Date.now();
   
-  // Perform health checks
-  const [database, backup, rateLimiter, redis, memory, disk] = await Promise.all([
+  // Check if comprehensive health check is requested
+  const url = new URL(request.url);
+  const comprehensive = url.searchParams.get('comprehensive') === 'true';
+  
+  if (comprehensive) {
+    // Use new comprehensive health check service
+    const systemHealth = await healthCheckService.getSystemHealth();
+    
+    // Log health check results
+    logger.info('Comprehensive health check performed', {
+      status: systemHealth.overall,
+      services: Object.entries(systemHealth.services).map(([name, status]) => ({ 
+        name, 
+        status: status.status,
+        responseTime: status.responseTime 
+      }))
+    });
+
+    // Return appropriate HTTP status based on health
+    const statusCode = systemHealth.overall === 'healthy' ? 200 : 
+                      systemHealth.overall === 'degraded' ? 200 : 503;
+
+    return NextResponse.json(systemHealth, { status: statusCode });
+  }
+  
+  // Legacy health check for backward compatibility
+  const [database, backup, rateLimiterCheck, redis, memory, disk] = await Promise.all([
     checkDatabaseHealth(),
     checkBackupHealth(),
     checkRateLimiterHealth(),
@@ -210,7 +236,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
   const services = {
     database,
     backup,
-    rateLimiter,
+    rateLimiter: rateLimiterCheck,
     redis,
     memory,
     disk

@@ -203,6 +203,193 @@ class RedisClient {
     }
   }
 
+  // Set operations
+  async sadd(key: string, ...members: string[]): Promise<number> {
+    if (!this.client || !this.isConnected) {
+      return 0
+    }
+
+    try {
+      return await this.client.sAdd(key, members)
+    } catch (error) {
+      logger.error('Redis SADD error:', error)
+      return 0
+    }
+  }
+
+  async srem(key: string, ...members: string[]): Promise<number> {
+    if (!this.client || !this.isConnected) {
+      return 0
+    }
+
+    try {
+      return await this.client.sRem(key, members)
+    } catch (error) {
+      logger.error('Redis SREM error:', error)
+      return 0
+    }
+  }
+
+  async smembers(key: string): Promise<string[]> {
+    if (!this.client || !this.isConnected) {
+      return []
+    }
+
+    try {
+      return await this.client.sMembers(key)
+    } catch (error) {
+      logger.error('Redis SMEMBERS error:', error)
+      return []
+    }
+  }
+
+  async scard(key: string): Promise<number> {
+    if (!this.client || !this.isConnected) {
+      return 0
+    }
+
+    try {
+      return await this.client.sCard(key)
+    } catch (error) {
+      logger.error('Redis SCARD error:', error)
+      return 0
+    }
+  }
+
+  // Additional methods for session management
+  async setex(key: string, seconds: number, value: string): Promise<boolean> {
+    if (!this.client || !this.isConnected) {
+      return false
+    }
+
+    try {
+      await this.client.setEx(key, seconds, value)
+      return true
+    } catch (error) {
+      logger.error('Redis SETEX error:', error)
+      return false
+    }
+  }
+
+  async lpush(key: string, ...values: string[]): Promise<number> {
+    if (!this.client || !this.isConnected) {
+      return 0
+    }
+
+    try {
+      return await this.client.lPush(key, values)
+    } catch (error) {
+      logger.error('Redis LPUSH error:', error)
+      return 0
+    }
+  }
+
+  async ltrim(key: string, start: number, stop: number): Promise<boolean> {
+    if (!this.client || !this.isConnected) {
+      return false
+    }
+
+    try {
+      await this.client.lTrim(key, start, stop)
+      return true
+    } catch (error) {
+      logger.error('Redis LTRIM error:', error)
+      return false
+    }
+  }
+
+  async lrange(key: string, start: number, stop: number): Promise<string[]> {
+    if (!this.client || !this.isConnected) {
+      return []
+    }
+
+    try {
+      return await this.client.lRange(key, start, stop)
+    } catch (error) {
+      logger.error('Redis LRANGE error:', error)
+      return []
+    }
+  }
+
+  // Sorted set operations
+  async zadd(key: string, score: number, member: string): Promise<number> {
+    if (!this.client || !this.isConnected) {
+      return 0
+    }
+
+    try {
+      return await this.client.zAdd(key, { score, value: member })
+    } catch (error) {
+      logger.error('Redis ZADD error:', error)
+      return 0
+    }
+  }
+
+  async zremrangebyrank(key: string, start: number, stop: number): Promise<number> {
+    if (!this.client || !this.isConnected) {
+      return 0
+    }
+
+    try {
+      return await this.client.zRemRangeByRank(key, start, stop)
+    } catch (error) {
+      logger.error('Redis ZREMRANGEBYRANK error:', error)
+      return 0
+    }
+  }
+
+  async zrevrange(key: string, start: number, stop: number): Promise<string[]> {
+    if (!this.client || !this.isConnected) {
+      return []
+    }
+
+    try {
+      return await this.client.zRevRange(key, start, stop)
+    } catch (error) {
+      logger.error('Redis ZREVRANGE error:', error)
+      return []
+    }
+  }
+
+  async zremrangebyscore(key: string, min: string | number, max: string | number): Promise<number> {
+    if (!this.client || !this.isConnected) {
+      return 0
+    }
+
+    try {
+      return await this.client.zRemRangeByScore(key, min, max)
+    } catch (error) {
+      logger.error('Redis ZREMRANGEBYSCORE error:', error)
+      return 0
+    }
+  }
+
+  async zcard(key: string): Promise<number> {
+    if (!this.client || !this.isConnected) {
+      return 0
+    }
+
+    try {
+      return await this.client.zCard(key)
+    } catch (error) {
+      logger.error('Redis ZCARD error:', error)
+      return 0
+    }
+  }
+
+  async info(section?: string): Promise<string> {
+    if (!this.client || !this.isConnected) {
+      return ''
+    }
+
+    try {
+      return await this.client.info(section)
+    } catch (error) {
+      logger.error('Redis INFO error:', error)
+      return ''
+    }
+  }
+
   isReady(): boolean {
     return this.isConnected && this.client !== null
   }

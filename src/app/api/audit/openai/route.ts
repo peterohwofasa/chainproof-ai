@@ -3,25 +3,18 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '../../../../lib/auth'
 import { db } from '../../../../lib/db'
 import { runOpenAIAudit, formatOpenAIAuditForChainProof, OpenAIAuditInput } from '../../../../lib/openai-agent'
-import { emitAuditProgress, emitAuditCompleted, emitAuditError } from '../../../../lib/socket'
+import { emitAuditProgress, emitAuditCompleted, emitAuditError } from '../../../../lib/sse'
 import { auditRequestSchema, validateContractCode } from '../../../../lib/validations'
 import { withAuth, withRateLimit, sanitizeRequestBody } from '../../../../lib/middleware'
 import { addSecurityHeaders } from '../../../../lib/security'
 import { withErrorHandler, ValidationError, AuthenticationError, RateLimitError, ExternalServiceError } from '../../../../lib/error-handler'
 import { createBlockchainExplorer, detectNetwork, SUPPORTED_NETWORKS } from '../../../../lib/blockchain-explorer'
 
-// Get socket.io instance from the server
-let io: any = null
-
-const getSocketInstance = () => {
-  if (!io) {
-    io = (global as any).socketIO
-  }
-  return io
-}
+// SSE is now handled by utility functions
+// No need for global Socket.IO instance
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-  const socketIO = getSocketInstance()
+  // SSE is handled by utility functions, no need for socket instance
   
   // Authentication check
   const authResponse = await withAuth(request)
@@ -148,20 +141,17 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   })
 
   // Emit initial progress
-  if (socketIO) {
-    emitAuditProgress(socketIO, audit.id, {
-      auditId: audit.id,
-      status: 'STARTED',
-      progress: 0,
-      message: 'Starting OpenAI agent audit...'
-    })
-  }
+  emitAuditProgress(audit.id, {
+    auditId: audit.id,
+    status: 'STARTED',
+    progress: 0,
+    message: 'Starting OpenAI agent audit...'
+  })
 
   // Start OpenAI agent audit in background
   analyzeContractWithOpenAI(
     finalContractCode || '',
     audit.id,
-    socketIO,
     {
       contractName: finalContractName,
       blockchain: contractNetwork,
@@ -181,9 +171,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     })
 
     // Emit error
-    if (socketIO) {
-      emitAuditError(socketIO, audit.id, error.message || 'OpenAI agent audit failed')
-    }
+    emitAuditError(audit.id, error.message || 'OpenAI agent audit failed')
   })
 
   // Deduct credits if not in free trial
@@ -208,7 +196,6 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
 async function analyzeContractWithOpenAI(
   contractCode: string,
   auditId: string,
-  socketIO: any,
   context: {
     contractName?: string
     blockchain?: string
@@ -218,14 +205,12 @@ async function analyzeContractWithOpenAI(
 ) {
   try {
     // Emit progress updates
-    if (socketIO) {
-      emitAuditProgress(socketIO, auditId, {
-        auditId,
-        status: 'ANALYZING',
-        progress: 10,
-        message: 'Preparing contract for OpenAI agent analysis...'
-      })
-    }
+    emitAuditProgress(auditId, {
+      auditId,
+      status: 'ANALYZING',
+      progress: 10,
+      message: 'Preparing contract for OpenAI agent analysis...'
+    })
 
     // Prepare input for OpenAI agent
     const openAIInput: OpenAIAuditInput = {
@@ -235,14 +220,12 @@ async function analyzeContractWithOpenAI(
       additionalContext: context.additionalContext
     }
 
-    if (socketIO) {
-      emitAuditProgress(socketIO, auditId, {
-        auditId,
-        status: 'ANALYZING',
-        progress: 25,
-        message: 'Sending contract to OpenAI agent for analysis...'
-      })
-    }
+    emitAuditProgress(auditId, {
+      auditId,
+      status: 'ANALYZING',
+      progress: 25,
+      message: 'Sending contract to OpenAI agent for analysis...'
+    })
 
     // Run OpenAI agent audit
     const openAIResult = await runOpenAIAudit(openAIInput)
@@ -251,26 +234,22 @@ async function analyzeContractWithOpenAI(
       throw new Error(openAIResult.error || 'OpenAI agent audit failed')
     }
 
-    if (socketIO) {
-      emitAuditProgress(socketIO, auditId, {
-        auditId,
-        status: 'ANALYZING',
-        progress: 75,
-        message: 'Processing OpenAI agent response...'
-      })
-    }
+    emitAuditProgress(auditId, {
+      auditId,
+      status: 'ANALYZING',
+      progress: 75,
+      message: 'Processing OpenAI agent response...'
+    })
 
     // Format results for ChainProof system
     const formattedResults = formatOpenAIAuditForChainProof(openAIResult)
 
-    if (socketIO) {
-      emitAuditProgress(socketIO, auditId, {
-        auditId,
-        status: 'ANALYZING',
-        progress: 90,
-        message: 'Saving audit results...'
-      })
-    }
+    emitAuditProgress(auditId, {
+      auditId,
+      status: 'ANALYZING',
+      progress: 90,
+      message: 'Saving audit results...'
+    })
 
     // Update audit with results
     await db.audit.update({
@@ -290,21 +269,19 @@ async function analyzeContractWithOpenAI(
       },
     })
 
-   if (socketIO) {
-      emitAuditProgress(socketIO, auditId, {
-        auditId,
-        status: 'COMPLETED',
-        progress: 100,
-        message: 'OpenAI agent audit completed'
-      })
-      emitAuditCompleted(socketIO, auditId, {
-        vulnerabilities: formattedResults.vulnerabilities,
-        gasOptimizations: formattedResults.gasOptimizations,
-        summary: formattedResults.summary,
-        score: formattedResults.score,
-        openAIAnalysis: formattedResults.openAIAnalysis
-      })
-    }
+    emitAuditProgress(auditId, {
+      auditId,
+      status: 'COMPLETED',
+      progress: 100,
+      message: 'OpenAI agent audit completed'
+    })
+    emitAuditCompleted(auditId, {
+      vulnerabilities: formattedResults.vulnerabilities,
+      gasOptimizations: formattedResults.gasOptimizations,
+      summary: formattedResults.summary,
+      score: formattedResults.score,
+      openAIAnalysis: formattedResults.openAIAnalysis
+    })
 
   } catch (error) {
     console.error('OpenAI agent audit error:', error)
@@ -319,9 +296,7 @@ async function analyzeContractWithOpenAI(
     })
 
     // Emit error
-    if (socketIO) {
-      emitAuditError(socketIO, auditId, error instanceof Error ? error.message : 'OpenAI agent audit failed')
-    }
+    emitAuditError(auditId, error instanceof Error ? error.message : 'OpenAI agent audit failed')
 
     throw error
   }

@@ -8,8 +8,22 @@ export async function GET(request: NextRequest) {
 
     const user = await db.user.findUnique({
       where: { id: authUser.userId },
-      include: {
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        walletAddress: true,
+        createdAt: true,
         subscriptions: {
+          select: {
+            id: true,
+            plan: true,
+            status: true,
+            creditsRemaining: true,
+            creditsTotal: true,
+            expiresAt: true,
+            createdAt: true
+          },
           where: { status: 'ACTIVE' },
           orderBy: { createdAt: 'desc' },
           take: 1,

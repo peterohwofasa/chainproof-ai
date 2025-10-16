@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getToken } from 'next-auth/jwt'
 import { validateRateLimit, sanitizeInput } from './validations'
+import { redisRateLimiter } from './rate-limiter-redis'
+import { logger } from './logger'
 
-// Rate limiting store (in production, use Redis)
+// Rate limiting store (fallback for when Redis is unavailable)
 const rateLimitStore = new Map<string, { count: number; resetTime: number }>()
 
 export async function withAuth(request: NextRequest) {
@@ -24,31 +26,60 @@ export async function withRateLimit(
   limit: number = 100, 
   windowMs: number = 60000 // 1 minute
 ) {
-  const now = Date.now()
-  const key = `${identifier}:${Math.floor(now / windowMs)}`
-  
-  const current = rateLimitStore.get(key) || { count: 0, resetTime: now + windowMs }
-  
-  if (current.count >= limit) {
-    return NextResponse.json(
-      { error: 'Rate limit exceeded' },
-      { status: 429 }
-    )
-  }
-  
-  current.count++
-  rateLimitStore.set(key, current)
-  
-  // Clean up old entries
-  if (rateLimitStore.size > 10000) {
-    for (const [k, v] of Array.from(rateLimitStore.entries())) {
-      if (v.resetTime < now) {
-        rateLimitStore.delete(k)
+  try {
+    // Try Redis first
+    const result = await redisRateLimiter.checkLimitByIdentifier(identifier, limit, Math.floor(windowMs / 1000));
+    
+    if (!result.allowed) {
+      return NextResponse.json(
+        { 
+          error: 'Rate limit exceeded',
+          resetTime: result.resetTime,
+          remaining: result.remaining
+        },
+        { 
+          status: 429,
+          headers: {
+            'X-RateLimit-Limit': String(limit),
+            'X-RateLimit-Remaining': String(result.remaining),
+            'X-RateLimit-Reset': String(result.resetTime),
+            'Retry-After': String(Math.ceil((result.resetTime - Date.now()) / 1000))
+          }
+        }
+      )
+    }
+    
+    return null // Continue with the request
+  } catch (error) {
+    // Fallback to in-memory rate limiting
+    logger.warn('Redis rate limiter failed in middleware, falling back to in-memory', { error });
+    
+    const now = Date.now()
+    const key = `${identifier}:${Math.floor(now / windowMs)}`
+    
+    const current = rateLimitStore.get(key) || { count: 0, resetTime: now + windowMs }
+    
+    if (current.count >= limit) {
+      return NextResponse.json(
+        { error: 'Rate limit exceeded' },
+        { status: 429 }
+      )
+    }
+    
+    current.count++
+    rateLimitStore.set(key, current)
+    
+    // Clean up old entries
+    if (rateLimitStore.size > 10000) {
+      for (const [k, v] of Array.from(rateLimitStore.entries())) {
+        if (v.resetTime < now) {
+          rateLimitStore.delete(k)
+        }
       }
     }
+    
+    return null // Continue with the request
   }
-  
-  return null // Continue with the request
 }
 
 export function withCors(request: NextRequest) {

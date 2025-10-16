@@ -10,9 +10,24 @@ export async function GET(request: NextRequest) {
 
     const audits = await db.audit.findMany({
       where: { userId },
-      include: {
-        contract: true,
+      select: {
+        id: true,
+        overallScore: true,
+        riskLevel: true,
+        status: true,
+        createdAt: true,
+        completedAt: true,
+        contract: {
+          select: {
+            name: true
+          }
+        },
         vulnerabilities: {
+          select: {
+            severity: true,
+            title: true,
+            category: true
+          },
           orderBy: { severity: 'desc' }
         },
         _count: {

@@ -39,7 +39,12 @@ export async function POST(request: NextRequest) {
           userId: session.user.id,
           status: 'COMPLETED'
         },
-        include: {
+        select: {
+          id: true,
+          overallScore: true,
+          riskLevel: true,
+          createdAt: true,
+          completedAt: true,
           contract: {
             select: {
               name: true
@@ -61,7 +66,12 @@ export async function POST(request: NextRequest) {
           userId: session.user.id,
           status: 'COMPLETED'
         },
-        include: {
+        select: {
+          id: true,
+          overallScore: true,
+          riskLevel: true,
+          createdAt: true,
+          completedAt: true,
           contract: {
             select: {
               name: true

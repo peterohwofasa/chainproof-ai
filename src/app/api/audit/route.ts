@@ -3,30 +3,21 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '../../../lib/auth'
 import { db } from '../../../lib/db'
 import ZAI from 'z-ai-web-dev-sdk'
-import { emitAuditProgress, emitAuditCompleted, emitAuditError } from '../../../lib/socket'
+import { emitAuditProgress, emitAuditCompleted, emitAuditError } from '../../../lib/sse'
 import { auditRequestSchema, validateContractCode } from '../../../lib/validations'
 import { withAuth, withRateLimit, sanitizeRequestBody, withSecurityHeaders } from '../../../lib/middleware'
 import { withErrorHandler, ValidationError, AuthenticationError, RateLimitError, ExternalServiceError } from '../../../lib/error-handler'
 import { createBlockchainExplorer, detectNetwork, SUPPORTED_NETWORKS } from '../../../lib/blockchain-explorer'
 import { staticAnalyzer } from '../../../lib/static-analysis'
 import { vulnerabilityDatabase } from '../../../lib/vulnerability-database'
+import * as vulnerabilityCache from '../../../lib/vulnerability-cache'
+import { AuditLogger, AuditEventType, AuditSeverity } from '../../../lib/audit-logging'
 
-// Get socket.io instance from the server
-let io: any = null
-
-// This is a workaround to get the socket.io instance
-// In a real implementation, you'd properly inject this
-const getSocketInstance = () => {
-  if (!io) {
-    // Try to get the socket instance from the global scope
-    // This is set in server.ts
-    io = (global as any).socketIO
-  }
-  return io
-}
+// SSE is now handled by the utility functions
+// No need for global Socket.IO instance
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
-  const socketIO = getSocketInstance()
+  // SSE is handled by utility functions, no need for socket instance
   
   // Authentication check
   const authResponse = await withAuth(request)
@@ -174,6 +165,26 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     },
   })
 
+  // Log audit start event
+  const requestInfo = await AuditLogger.extractRequestInfo(request)
+  await AuditLogger.logEvent({
+    eventType: AuditEventType.DATA_ACCESSED,
+    severity: AuditSeverity.MEDIUM,
+    ...requestInfo,
+    resource: 'smart_contract_audit',
+    action: 'AUDIT_STARTED',
+    details: {
+      auditId: audit.id,
+      contractId: contract.id,
+      contractName: finalContractName,
+      contractAddress,
+      network: contractNetwork,
+      auditType,
+      hasSourceCode: !!finalContractCode,
+      isFreeTrial: isInFreeTrial
+    }
+  })
+
   // Deduct one credit (only if not in free trial)
   if (!isInFreeTrial) {
     await db.subscription.update({
@@ -184,23 +195,20 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     })
   }
 
-  // Emit initial progress
-  if (socketIO) {
-    emitAuditProgress(socketIO, audit.id, {
-      auditId: audit.id,
-      status: 'STARTED',
-      progress: 10,
-      message: 'Initializing security analysis...',
-      currentStep: 'Setup',
-      estimatedTimeRemaining: 120,
-    })
-  }
+  // Emit initial progress via SSE
+  emitAuditProgress(audit.id, {
+    auditId: audit.id,
+    status: 'STARTED',
+    progress: 10,
+    message: 'Initializing security analysis...',
+    currentStep: 'Setup',
+    estimatedTimeRemaining: 120,
+  })
 
   // Perform AI analysis with progress updates
   const analysisResult = await analyzeContractWithProgress(
     finalContractCode || '', 
-    audit.id, 
-    socketIO,
+    audit.id,
     {
       compilerVersion,
       optimizationEnabled,
@@ -252,16 +260,34 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     },
   })
 
-  // Emit completion
-  if (socketIO) {
-    emitAuditCompleted(socketIO, audit.id, {
+  // Emit completion via SSE
+  emitAuditCompleted(audit.id, {
+    auditId: audit.id,
+    overallScore: analysisResult.overallScore,
+    riskLevel: analysisResult.riskLevel,
+    vulnerabilities: analysisResult.vulnerabilities,
+    duration: analysisResult.duration,
+  })
+
+  // Log audit completion event
+  await AuditLogger.logEvent({
+    eventType: AuditEventType.DATA_ACCESSED,
+    severity: analysisResult.riskLevel === 'CRITICAL' ? AuditSeverity.HIGH : 
+              analysisResult.riskLevel === 'HIGH' ? AuditSeverity.MEDIUM : AuditSeverity.LOW,
+    ...requestInfo,
+    resource: 'smart_contract_audit',
+    action: 'AUDIT_COMPLETED',
+    details: {
       auditId: audit.id,
+      contractId: contract.id,
       overallScore: analysisResult.overallScore,
       riskLevel: analysisResult.riskLevel,
-      vulnerabilities: analysisResult.vulnerabilities,
+      vulnerabilityCount: analysisResult.vulnerabilities?.length || 0,
       duration: analysisResult.duration,
-    })
-  }
+      creditsUsed: isInFreeTrial ? 0 : 1,
+      creditsRemaining: subscription.creditsRemaining - (isInFreeTrial ? 0 : 1)
+    }
+  })
 
   return NextResponse.json({
     success: true,
@@ -276,8 +302,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
 
 async function analyzeContractWithProgress(
   contractCode: string, 
-  auditId: string, 
-  socketIO: any,
+  auditId: string,
   context: {
     compilerVersion?: string
     optimizationEnabled?: boolean
@@ -286,6 +311,37 @@ async function analyzeContractWithProgress(
   } = {}
 ) {
   const startTime = Date.now()
+  
+  // Check for cached analysis results first
+  try {
+    const cachedResult = await vulnerabilityCache.getCachedAnalysisResult(contractCode, context)
+    if (cachedResult) {
+      console.log('Using cached analysis result')
+      
+      // Emit progress steps quickly for cached results
+      const quickSteps = [
+        { status: 'ANALYZING', progress: 50, message: 'Loading cached analysis...', currentStep: 'Cache Retrieval' },
+        { status: 'GENERATING_REPORT', progress: 90, message: 'Preparing cached report...', currentStep: 'Report Generation' },
+      ]
+      
+      for (const step of quickSteps) {
+        emitAuditProgress(auditId, {
+          auditId,
+          status: step.status as 'STARTED' | 'ANALYZING' | 'DETECTING' | 'GENERATING_REPORT' | 'COMPLETED' | 'ERROR' | 'FETCHING',
+          progress: step.progress,
+          message: step.message,
+          currentStep: step.currentStep,
+          estimatedTimeRemaining: 5,
+        })
+        await new Promise(resolve => setTimeout(resolve, 200))
+      }
+      
+      return cachedResult
+    }
+  } catch (cacheError) {
+    console.warn('Cache check failed, proceeding with fresh analysis:', cacheError)
+  }
+  
   const steps = [
     { status: 'ANALYZING', progress: 30, message: 'Parsing Solidity code...', currentStep: 'Parsing' },
     { status: 'ANALYZING', progress: 45, message: 'Analyzing contract structure...', currentStep: 'Structure Analysis' },
@@ -368,18 +424,16 @@ async function analyzeContractWithProgress(
       }
     }
 
-    // Emit progress steps
+    // Emit progress steps via SSE
     for (const step of steps) {
-      if (socketIO) {
-        emitAuditProgress(socketIO, auditId, {
-          auditId,
-          status: step.status as 'STARTED' | 'ANALYZING' | 'DETECTING' | 'GENERATING_REPORT' | 'COMPLETED' | 'ERROR' | 'FETCHING',
-          progress: step.progress,
-          message: step.message,
-          currentStep: step.currentStep,
-          estimatedTimeRemaining: Math.max(30, 120 - (step.progress * 1.2)),
-        })
-      }
+      emitAuditProgress(auditId, {
+        auditId,
+        status: step.status as 'STARTED' | 'ANALYZING' | 'DETECTING' | 'GENERATING_REPORT' | 'COMPLETED' | 'ERROR' | 'FETCHING',
+        progress: step.progress,
+        message: step.message,
+        currentStep: step.currentStep,
+        estimatedTimeRemaining: Math.max(30, 120 - (step.progress * 1.2)),
+      })
       // Add realistic delay for processing
       await new Promise(resolve => setTimeout(resolve, 600))
     }
@@ -502,16 +556,14 @@ Return the analysis in valid JSON format:
     // Perform AI analysis if available, otherwise use enhanced pattern matching
     if (aiAvailable && zai) {
       try {
-        if (socketIO) {
-          emitAuditProgress(socketIO, auditId, {
-            auditId,
-            status: 'ANALYZING',
-            progress: 80,
-            message: 'Running AI-powered security analysis...',
-            currentStep: 'AI Analysis',
-            estimatedTimeRemaining: 40,
-          })
-        }
+        emitAuditProgress(auditId, {
+          auditId,
+          status: 'ANALYZING',
+          progress: 80,
+          message: 'Running AI-powered security analysis...',
+          currentStep: 'AI Analysis',
+          estimatedTimeRemaining: 40,
+        })
 
         const completion = await zai.chat.completions.create({
           messages: [
@@ -568,7 +620,7 @@ Return the analysis in valid JSON format:
 
       // Use consensus analysis if available, otherwise run pattern matching
       if (!consensusAnalysis) {
-        const patternResults = vulnerabilityDatabase.enhanceVulnerabilityDetection(contractCode)
+        const patternResults = await vulnerabilityDatabase.enhanceVulnerabilityDetection(contractCode)
         consensusAnalysis = {
           vulnerabilities: patternResults.map(result => ({
             title: result.pattern.title,
@@ -598,6 +650,19 @@ Return the analysis in valid JSON format:
 
     const duration = Math.floor((Date.now() - startTime) / 1000)
 
+    // Cache the analysis result for future use
+    try {
+      const { vulnerabilityCache } = await import('@/lib/vulnerability-cache')
+      await vulnerabilityCache.cacheAnalysisResult(contractCode, {
+        vulnerabilities: analysisResult.vulnerabilities,
+        overallScore: analysisResult.overallScore,
+        riskLevel: analysisResult.riskLevel,
+        analysisMethod: analysisResult.analysisMethod || 'AI_ENHANCED'
+      })
+    } catch (cacheError) {
+      console.warn('Failed to cache analysis result:', cacheError)
+    }
+
     return {
       ...analysisResult,
       duration,
@@ -606,19 +671,17 @@ Return the analysis in valid JSON format:
     console.error('Analysis error:', error)
     
     // Provide comprehensive fallback analysis instead of throwing error
-    if (socketIO) {
-      emitAuditProgress(socketIO, auditId, {
-        auditId,
-        status: 'ANALYZING',
-        progress: 90,
-        message: 'Completing analysis with fallback methods...',
-        currentStep: 'Fallback Analysis',
-        estimatedTimeRemaining: 20,
-      })
-    }
+    emitAuditProgress(auditId, {
+      auditId,
+      status: 'ANALYZING',
+      progress: 90,
+      message: 'Completing analysis with fallback methods...',
+      currentStep: 'Fallback Analysis',
+      estimatedTimeRemaining: 20,
+    })
 
     // Generate fallback analysis using vulnerability database
-    const patternResults = vulnerabilityDatabase.enhanceVulnerabilityDetection(contractCode)
+    const patternResults = await vulnerabilityDatabase.enhanceVulnerabilityDetection(contractCode)
     
     // Combine pattern results for comprehensive analysis
     const allVulnerabilities = [

@@ -6,6 +6,7 @@ import { config } from './config'
 import { logger } from './logger'
 import { SecurityUtils } from './security'
 import { signInWithBase } from './base-account'
+import { RedisAdapter } from './nextauth-redis-adapter'
 
 // Extend NextAuth types
 declare module 'next-auth' {
@@ -121,7 +122,9 @@ export async function requireAuth(req: Request): Promise<{ userId: string }> {
 }
 
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(db),
+  adapter: RedisAdapter({
+    baseKeyPrefix: 'chainproof:auth:',
+  }),
   providers: [
     CredentialsProvider({
       id: 'base-account',
@@ -292,7 +295,9 @@ export const authOptions: NextAuthOptions = {
     })
   ],
   session: {
-    strategy: 'jwt',
+    strategy: 'database',
+    maxAge: 30 * 24 * 60 * 60, // 30 days
+    updateAge: 24 * 60 * 60, // 24 hours
   },
   pages: {
     signIn: '/login',
@@ -301,29 +306,18 @@ export const authOptions: NextAuthOptions = {
   secret: config.NEXTAUTH_SECRET,
   useSecureCookies: process.env.NODE_ENV === 'production',
   callbacks: {
-    async jwt({ token, user }) {
+    async session({ session, user }) {
       if (user) {
-        token.id = user.id;
+        session.user.id = user.id
       }
-      return token;
-    },
-    async session({ session, token }) {
-      if (token) {
-        session.user.id = token.id as string;
-      }
-      return session;
+      return session
     },
     async redirect({ url, baseUrl }) {
-      // If the URL is relative, allow it as-is
-      if (url.startsWith("/")) {
-        return url
-      }
-      // If the URL is on the same origin, allow it
-      else if (new URL(url).origin === baseUrl) {
-        return url
-      }
-      // Default to home page
+      // Allows relative callback URLs
+      if (url.startsWith('/')) return `${baseUrl}${url}`
+      // Allows callback URLs on the same origin
+      else if (new URL(url).origin === baseUrl) return url
       return baseUrl
-    }
+    },
   },
 }
