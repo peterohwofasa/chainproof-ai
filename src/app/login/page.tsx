@@ -13,6 +13,7 @@ import { Shield, Mail, Lock, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { BaseSignInButton } from '@/components/auth/base-signin-button'
 import { CDPSignInButton } from '@/components/auth/cdp-signin-button'
+import { ClientOnly } from '@/components/client-only'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -137,25 +138,27 @@ export default function LoginPage() {
             </div>
 
             <div className="mt-6 space-y-3">
-              <BaseSignInButton 
-                className="w-full"
-                onSuccess={() => {
-                  toast.success('Successfully connected with Base!')
-                }}
-                onError={(error) => {
-                  toast.error(`Base connection failed: ${error}`)
-                }}
-              />
-              
-              <CDPSignInButton 
-                className="w-full"
-                onSuccess={() => {
-                  toast.success('Successfully connected with CDP!')
-                }}
-                onError={(error) => {
-                  toast.error(`CDP connection failed: ${error}`)
-                }}
-              />
+              <ClientOnly>
+                <BaseSignInButton 
+                  className="w-full"
+                  onSuccess={() => {
+                    toast.success('Successfully connected with Base!')
+                  }}
+                  onError={(error) => {
+                    toast.error(`Base connection failed: ${error}`)
+                  }}
+                />
+                
+                <CDPSignInButton 
+                  className="w-full"
+                  onSuccess={() => {
+                    toast.success('Successfully connected with CDP!')
+                  }}
+                  onError={(error) => {
+                    toast.error(`CDP connection failed: ${error}`)
+                  }}
+                />
+              </ClientOnly>
             </div>
           </div>
 
