@@ -11,6 +11,7 @@ export interface StaticAnalysisResult {
 export interface Vulnerability {
   id: string
   title: string
+  type: string
   description: string
   severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO'
   category: string
@@ -67,6 +68,12 @@ export class StaticAnalyzer {
     vulnerabilities: Vulnerability[]
     confidence: number
     metrics: AnalysisMetrics
+    summary: {
+      overallScore: number
+      riskLevel: string
+      totalVulnerabilities: number
+      toolsUsed: string[]
+    }
   }> {
     // Aggregate vulnerabilities from multiple tools
     const vulnerabilityMap = new Map<string, Vulnerability>()
@@ -102,15 +109,39 @@ export class StaticAnalyzer {
     const confidence = totalVulnerabilities > 0 ? consensusVulnerabilities / totalVulnerabilities : 1
 
     // Aggregate metrics
+    const validResults = results.filter(r => r.metrics)
     const metrics: AnalysisMetrics = {
-      totalLines: Math.max(...results.map(r => r.metrics.totalLines)),
-      complexityScore: Math.max(...results.map(r => r.metrics.complexityScore)),
-      functionsAnalyzed: Math.max(...results.map(r => r.metrics.functionsAnalyzed)),
-      contractsAnalyzed: Math.max(...results.map(r => r.metrics.contractsAnalyzed)),
-      gasEstimate: results.find(r => r.metrics.gasEstimate)?.metrics.gasEstimate
+      totalLines: validResults.length > 0 ? Math.max(...validResults.map(r => r.metrics.totalLines)) : 0,
+      complexityScore: validResults.length > 0 ? Math.max(...validResults.map(r => r.metrics.complexityScore)) : 0,
+      functionsAnalyzed: validResults.length > 0 ? Math.max(...validResults.map(r => r.metrics.functionsAnalyzed)) : 0,
+      contractsAnalyzed: validResults.length > 0 ? Math.max(...validResults.map(r => r.metrics.contractsAnalyzed)) : 0,
+      gasEstimate: validResults.find(r => r.metrics.gasEstimate)?.metrics.gasEstimate
     }
 
-    return { vulnerabilities, confidence, metrics }
+    // Generate summary
+    const highVulns = vulnerabilities.filter(v => v.severity === 'HIGH').length
+    const mediumVulns = vulnerabilities.filter(v => v.severity === 'MEDIUM').length
+    const lowVulns = vulnerabilities.filter(v => v.severity === 'LOW').length
+    
+    // Calculate overall score (0-100, higher is better)
+    const overallScore = Math.max(0, 100 - (highVulns * 30 + mediumVulns * 15 + lowVulns * 5))
+    
+    // Determine risk level
+    let riskLevel = 'LOW'
+    if (highVulns > 0 || mediumVulns > 2) {
+      riskLevel = 'HIGH'
+    } else if (mediumVulns > 0 || lowVulns > 3) {
+      riskLevel = 'MEDIUM'
+    }
+    
+    const summary = {
+      overallScore,
+      riskLevel,
+      totalVulnerabilities: vulnerabilities.length,
+      toolsUsed: results.map(r => r.tool).filter((tool, index, arr) => arr.indexOf(tool) === index)
+    }
+
+    return { vulnerabilities, confidence, metrics, summary }
   }
 }
 
@@ -151,6 +182,7 @@ class SlitherAnalyzer implements AnalysisTool {
         vulnerabilities.push({
           id: `${pattern.id}_${match.line}`,
           title: pattern.title,
+          type: pattern.category.toLowerCase().replace(/\s+/g, '_'),
           description: pattern.description,
           severity: pattern.severity,
           category: pattern.category,
@@ -166,13 +198,14 @@ class SlitherAnalyzer implements AnalysisTool {
 
     // Keep existing specific pattern matching for complex cases
     // Reentrancy detection (more specific than database patterns)
-    const reentrancyPattern = /(\w+)\.call\s*\(\s*.*?\s*\)\s*;?\s*\n\s*(\w+)\[\w+\]\s*=/
-    const reentrancyMatches = sourceCode.matchAll(reentrancyPattern)
+    const reentrancyPattern = /(\w+)\.call\s*\(\s*.*?\s*\)\s*;?\s*\n\s*(\w+)\[\w+\]\s*=/g
+    const reentrancyMatches = Array.from(sourceCode.matchAll(reentrancyPattern))
     for (const match of reentrancyMatches) {
       const lineNumber = this.getLineNumber(sourceCode, match.index!)
       vulnerabilities.push({
         id: `reentrancy_complex_${lineNumber}`,
         title: 'Complex Reentrancy Vulnerability',
+        type: 'reentrancy',
         description: 'External call followed by state change creates potential for reentrancy attack with complex execution flow',
         severity: 'HIGH',
         category: 'Reentrancy',
@@ -193,13 +226,14 @@ class SlitherAnalyzer implements AnalysisTool {
 
   private detectComplexVulnerabilities(sourceCode: string, lines: string[], vulnerabilities: Vulnerability[]) {
     // Detect complex race conditions
-    const raceConditionPattern = /require\s*\(\s*\w+\s*>\s*block\.number\s*\)/
-    const raceMatches = sourceCode.matchAll(raceConditionPattern)
+    const raceConditionPattern = /require\s*\(\s*\w+\s*>\s*block\.number\s*\)/g
+    const raceMatches = Array.from(sourceCode.matchAll(raceConditionPattern))
     for (const match of raceMatches) {
       const lineNumber = this.getLineNumber(sourceCode, match.index!)
       vulnerabilities.push({
         id: `race_condition_${lineNumber}`,
         title: 'Block Number Race Condition',
+        type: 'front_running',
         description: 'Using block.number for timing can create race conditions in block propagation',
         severity: 'MEDIUM',
         category: 'Front-Running',
@@ -213,14 +247,15 @@ class SlitherAnalyzer implements AnalysisTool {
     }
 
     // Detect oracle manipulation
-    const oraclePattern = /uint256\s+price\s*=\s*(uniswapV2|chainlink|price)/i
-    const oracleMatches = sourceCode.matchAll(oraclePattern)
+    const oraclePattern = /uint256\s+price\s*=\s*(uniswapV2|chainlink|price)/gi
+    const oracleMatches = Array.from(sourceCode.matchAll(oraclePattern))
     for (const match of oracleMatches) {
       const lineNumber = this.getLineNumber(sourceCode, match.index!)
       if (!sourceCode.includes('delay') && !sourceCode.includes('twap')) {
         vulnerabilities.push({
           id: `oracle_manipulation_${lineNumber}`,
           title: 'Potential Oracle Manipulation',
+          type: 'oracle_manipulation',
           description: 'Oracle price usage without delay or TWAP mechanism can be manipulated',
           severity: 'HIGH',
           category: 'Oracle Manipulation',
@@ -284,13 +319,14 @@ class MythrilAnalyzer implements AnalysisTool {
     const lines = sourceCode.split('\n')
 
     // Selfdestruct detection
-    const selfdestructPattern = /selfdestruct\s*\(\s*\w+\s*\)/
-    const selfdestructMatches = sourceCode.matchAll(selfdestructPattern)
+    const selfdestructPattern = /selfdestruct\s*\(\s*\w+\s*\)/g
+    const selfdestructMatches = Array.from(sourceCode.matchAll(selfdestructPattern))
     for (const match of selfdestructMatches) {
       const lineNumber = this.getLineNumber(sourceCode, match.index!)
       vulnerabilities.push({
         id: `selfdestruct_${lineNumber}`,
         title: 'Selfdestruct Usage Detected',
+        type: 'denial_of_service',
         description: 'Selfdestruct can be used maliciously to destroy contracts and drain funds',
         severity: 'CRITICAL',
         category: 'Denial of Service',
@@ -304,14 +340,15 @@ class MythrilAnalyzer implements AnalysisTool {
     }
 
     // Delegatecall to user-supplied address
-    const delegatecallPattern = /delegatecall\s*\(\s*[^)]*\w+[^)]*\s*\)/
-    const delegatecallMatches = sourceCode.matchAll(delegatecallPattern)
+    const delegatecallPattern = /delegatecall\s*\(\s*[^)]*\w+[^)]*\s*\)/g
+    const delegatecallMatches = Array.from(sourceCode.matchAll(delegatecallPattern))
     for (const match of delegatecallMatches) {
       const lineNumber = this.getLineNumber(sourceCode, match.index!)
       if (!match[0].includes('immutable') && !match[0].includes('constant')) {
         vulnerabilities.push({
           id: `delegatecall_${lineNumber}`,
           title: 'Dangerous Delegatecall',
+          type: 'delegatecall',
           description: 'Delegatecall to user-supplied address can lead to code injection',
           severity: 'CRITICAL',
           category: 'Delegatecall',
@@ -326,13 +363,14 @@ class MythrilAnalyzer implements AnalysisTool {
     }
 
     // Timestamp dependence
-    const timestampPattern = /block\.timestamp|now\s*;/
-    const timestampMatches = sourceCode.matchAll(timestampPattern)
+    const timestampPattern = /block\.timestamp|now\s*;/g
+    const timestampMatches = Array.from(sourceCode.matchAll(timestampPattern))
     for (const match of timestampMatches) {
       const lineNumber = this.getLineNumber(sourceCode, match.index!)
       vulnerabilities.push({
         id: `timestamp_${lineNumber}`,
         title: 'Timestamp Dependence',
+        type: 'bad_randomness',
         description: 'Using block.timestamp for critical logic can be manipulated by miners',
         severity: 'LOW',
         category: 'Bad Randomness',
@@ -395,6 +433,14 @@ class CustomPatternAnalyzer implements AnalysisTool {
     const vulnerabilities: Vulnerability[] = []
     const lines = sourceCode.split('\n')
 
+    // Reentrancy vulnerabilities
+    const reentrancyIssues = this.detectReentrancy(sourceCode, lines)
+    vulnerabilities.push(...reentrancyIssues)
+
+    // External call vulnerabilities
+    const externalCallIssues = this.detectExternalCalls(sourceCode, lines)
+    vulnerabilities.push(...externalCallIssues)
+
     // Gas optimization issues
     const gasIssues = this.detectGasIssues(sourceCode, lines)
     vulnerabilities.push(...gasIssues)
@@ -410,17 +456,114 @@ class CustomPatternAnalyzer implements AnalysisTool {
     return vulnerabilities
   }
 
+  private detectReentrancy(sourceCode: string, lines: string[]): Vulnerability[] {
+    const vulnerabilities: Vulnerability[] = []
+
+    // Extract functions properly handling nested braces
+    const functions = this.extractFunctions(sourceCode)
+    
+    for (const functionCode of functions) {
+      // Check if function has external calls
+      const hasExternalCall = /\.call(\{[^}]*\})?\s*\([^)]*\)/.test(functionCode)
+      
+      // Check if function has state changes (fixed to handle msg.sender)
+      const hasStateChange = /balances?\[[^\]]+\]\s*[-+*/]?=|\w+\[[^\]]+\]\s*[-+*/]?=/.test(functionCode)
+      
+      if (hasExternalCall && hasStateChange) {
+        // Find the line number of the external call
+        const callMatch = functionCode.match(/\.call(\{[^}]*\})?\s*\([^)]*\)/)
+        if (callMatch) {
+          const callIndex = sourceCode.indexOf(callMatch[0])
+          const lineNumber = this.getLineNumber(sourceCode, callIndex)
+          
+          vulnerabilities.push({
+            id: `reentrancy_${lineNumber}`,
+            title: 'Reentrancy Vulnerability',
+            type: 'reentrancy',
+            description: 'External call made in same function as state update, allowing potential reentrancy attacks',
+            severity: 'HIGH',
+            category: 'Reentrancy',
+            lineNumbers: [lineNumber],
+            codeSnippet: lines.slice(Math.max(0, lineNumber - 2), lineNumber + 3).join('\n'),
+            recommendation: 'Use the checks-effects-interactions pattern: update state before external calls, or use reentrancy guards.',
+            confidence: 'HIGH'
+          })
+        }
+      }
+    }
+
+    return vulnerabilities
+  }
+
+  private extractFunctions(code: string): string[] {
+    const functions: string[] = []
+    const functionStarts: { start: number; openBrace: number }[] = []
+    let match
+    const functionRegex = /function\s+\w+[^{]*\{/g
+    
+    while ((match = functionRegex.exec(code)) !== null) {
+      functionStarts.push({
+        start: match.index,
+        openBrace: match.index + match[0].length - 1
+      })
+    }
+    
+    for (const funcStart of functionStarts) {
+      let braceCount = 1
+      let i = funcStart.openBrace + 1
+      
+      while (i < code.length && braceCount > 0) {
+        if (code[i] === '{') braceCount++
+        else if (code[i] === '}') braceCount--
+        i++
+      }
+      
+      if (braceCount === 0) {
+        functions.push(code.substring(funcStart.start, i))
+      }
+    }
+    
+    return functions
+  }
+
+  private detectExternalCalls(sourceCode: string, lines: string[]): Vulnerability[] {
+    const vulnerabilities: Vulnerability[] = []
+
+    // Pattern: unchecked external calls
+    const uncheckedCallPattern = /(\w+)\.call\s*\([^)]*\)\s*;(?!\s*require)/g
+    const matches = Array.from(sourceCode.matchAll(uncheckedCallPattern))
+    
+    for (const match of matches) {
+      const lineNumber = this.getLineNumber(sourceCode, match.index!)
+      vulnerabilities.push({
+         id: `external_call_${lineNumber}`,
+         title: 'Unchecked External Call',
+         type: 'external_call',
+         description: 'External call without checking return value can fail silently',
+         severity: 'MEDIUM',
+         category: 'External Call',
+         lineNumbers: [lineNumber],
+         codeSnippet: lines[lineNumber - 1],
+         recommendation: 'Check the return value of external calls or use require() to handle failures.',
+         confidence: 'HIGH'
+       })
+    }
+
+    return vulnerabilities
+  }
+
   private detectGasIssues(sourceCode: string, lines: string[]): Vulnerability[] {
     const vulnerabilities: Vulnerability[] = []
 
     // Loop with storage operations
-    const loopPattern = /for\s*\([^)]*\)\s*{[^}]*\w+\[\w+\]/s
-    const loopMatches = sourceCode.matchAll(loopPattern)
+    const loopPattern = /for\s*\([^)]*\)\s*{[\s\S]*?\w+\[\w+\]/g
+    const loopMatches = Array.from(sourceCode.matchAll(loopPattern))
     for (const match of loopMatches) {
       const lineNumber = this.getLineNumber(sourceCode, match.index!)
       vulnerabilities.push({
         id: `gas_loop_${lineNumber}`,
         title: 'Gas-Intensive Loop with Storage Operations',
+        type: 'gas_optimization',
         description: 'Loop that performs storage operations can cause high gas costs',
         severity: 'MEDIUM',
         category: 'Gas Optimization',
@@ -432,13 +575,14 @@ class CustomPatternAnalyzer implements AnalysisTool {
     }
 
     // Unnecessary storage reads
-    const storageReadPattern = /\w+\[\w+\]\s*;?\s*\n\s*\w+\[\w+\]/
-    const storageMatches = sourceCode.matchAll(storageReadPattern)
+    const storageReadPattern = /\w+\[\w+\]\s*;?\s*\n\s*\w+\[\w+\]/g
+    const storageMatches = Array.from(sourceCode.matchAll(storageReadPattern))
     for (const match of storageMatches) {
       const lineNumber = this.getLineNumber(sourceCode, match.index!)
       vulnerabilities.push({
         id: `gas_storage_${lineNumber}`,
         title: 'Duplicate Storage Read',
+        type: 'gas_optimization',
         description: 'Same storage variable read multiple times without modification',
         severity: 'LOW',
         category: 'Gas Optimization',
@@ -456,13 +600,14 @@ class CustomPatternAnalyzer implements AnalysisTool {
     const vulnerabilities: Vulnerability[] = []
 
     // Division by zero potential
-    const divisionPattern = /\/\s*\w+(?!\s*.*require\s*\(\s*\w+\s*>\s*0)/
-    const divisionMatches = sourceCode.matchAll(divisionPattern)
+    const divisionPattern = /\/\s*\w+(?!\s*.*require\s*\(\s*\w+\s*>\s*0)/g
+    const divisionMatches = Array.from(sourceCode.matchAll(divisionPattern))
     for (const match of divisionMatches) {
       const lineNumber = this.getLineNumber(sourceCode, match.index!)
       vulnerabilities.push({
         id: `division_${lineNumber}`,
         title: 'Potential Division by Zero',
+        type: 'logic_error',
         description: 'Division operation without zero check can cause revert',
         severity: 'MEDIUM',
         category: 'Logic Error',
@@ -481,7 +626,7 @@ class CustomPatternAnalyzer implements AnalysisTool {
 
     // Missing events for state changes
     const stateChangePattern = /\w+\[\w+\]\s*=\s*\w+/g
-    const stateChangeMatches = sourceCode.matchAll(stateChangePattern)
+    const stateChangeMatches = Array.from(sourceCode.matchAll(stateChangePattern))
     for (const match of stateChangeMatches) {
       const lineNumber = this.getLineNumber(sourceCode, match.index!)
       const functionScope = this.getFunctionScope(sourceCode, lineNumber)
@@ -490,6 +635,7 @@ class CustomPatternAnalyzer implements AnalysisTool {
         vulnerabilities.push({
           id: `event_${lineNumber}`,
           title: 'Missing Event for State Change',
+          type: 'event_logging',
           description: 'State change without corresponding event emission',
           severity: 'LOW',
           category: 'Event Logging',

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthService, AuthError, createAuthResponse } from '@/lib/auth'
+import { SecurityUtils } from '@/lib/security'
 import { z } from 'zod'
 
 const registerSchema = z.object({
@@ -50,10 +51,12 @@ export async function POST(request: NextRequest) {
     })
 
     // Create auth response
+    const token = SecurityUtils.generateSecureToken(64)
     const response = createAuthResponse({
-      userId: user.id,
+      id: user.id,
       email: user.email,
-    })
+      name: user.name,
+    }, token)
 
     return NextResponse.json(response)
   } catch (error) {
@@ -61,7 +64,7 @@ export async function POST(request: NextRequest) {
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { error: 'Validation failed', details: error.errors },
+        { error: 'Validation failed', details: error.issues },
         { status: 400 }
       )
     }

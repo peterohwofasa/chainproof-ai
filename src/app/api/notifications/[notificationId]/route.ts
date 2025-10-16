@@ -5,7 +5,7 @@ import { db } from '@/lib/db'
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { notificationId: string } }
+  { params }: { params: Promise<{ notificationId: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -17,7 +17,7 @@ export async function PUT(
       )
     }
 
-    const { notificationId } = params
+    const { notificationId } = await params
     const body = await request.json()
     const { read } = body
 
@@ -66,7 +66,7 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { notificationId: string } }
+  { params }: { params: Promise<{ notificationId: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -78,7 +78,7 @@ export async function DELETE(
       )
     }
 
-    const { notificationId } = params
+    const { notificationId } = await params
 
     // Verify notification belongs to user
     const existingNotification = await db.notification.findFirst({

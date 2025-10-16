@@ -187,7 +187,7 @@ export class DatabaseBackup {
   async cleanupOldBackups(): Promise<void> {
     const backups = await this.listBackups();
     const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - config.BACKUP_RETENTION_DAYS);
+    cutoffDate.setDate(cutoffDate.getDate() - Number(config.BACKUP_RETENTION_DAYS));
 
     const oldBackups = backups.filter(backup => new Date(backup.createdAt) < cutoffDate);
     

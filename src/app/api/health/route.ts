@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { config } from '@/lib/config';
 import { databaseBackup } from '@/lib/backup';
 import { rateLimiter } from '@/lib/rate-limiter';
+import { redisClient } from '@/lib/redis';
 
 interface HealthCheck {
   status: 'healthy' | 'degraded' | 'unhealthy';
@@ -16,6 +17,7 @@ interface HealthCheck {
     database: ServiceStatus;
     backup: ServiceStatus;
     rateLimiter: ServiceStatus;
+    redis: ServiceStatus;
     memory: MemoryStatus;
     disk: DiskStatus;
   };
@@ -28,7 +30,7 @@ interface HealthCheck {
 }
 
 interface ServiceStatus {
-  status: 'healthy' | 'unhealthy';
+  status: 'healthy' | 'degraded' | 'unhealthy';
   responseTime?: number;
   error?: string;
   lastCheck: string;
@@ -109,6 +111,35 @@ function checkRateLimiterHealth(): ServiceStatus {
   }
 }
 
+async function checkRedisHealth(): Promise<ServiceStatus> {
+  const start = Date.now();
+  try {
+    if (!redisClient.isReady()) {
+      return {
+        status: 'unhealthy',
+        error: 'Redis client not connected',
+        lastCheck: new Date().toISOString()
+      };
+    }
+
+    const pingResult = await redisClient.ping();
+    return {
+      status: pingResult ? 'healthy' : 'unhealthy',
+      responseTime: Date.now() - start,
+      error: pingResult ? undefined : 'Redis ping failed',
+      lastCheck: new Date().toISOString()
+    };
+  } catch (error) {
+    logger.error('Redis health check failed', { error });
+    return {
+      status: 'unhealthy',
+      error: error instanceof Error ? error.message : 'Unknown error',
+      responseTime: Date.now() - start,
+      lastCheck: new Date().toISOString()
+    };
+  }
+}
+
 async function getMemoryStatus(): Promise<MemoryStatus> {
   const usage = process.memoryUsage();
   const { totalmem } = await import('os');
@@ -167,10 +198,11 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
   const start = Date.now();
   
   // Perform health checks
-  const [database, backup, rateLimiter, memory, disk] = await Promise.all([
+  const [database, backup, rateLimiter, redis, memory, disk] = await Promise.all([
     checkDatabaseHealth(),
     checkBackupHealth(),
     checkRateLimiterHealth(),
+    checkRedisHealth(),
     getMemoryStatus(),
     getDiskStatus()
   ]);
@@ -179,6 +211,7 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     database,
     backup,
     rateLimiter,
+    redis,
     memory,
     disk
   };
@@ -217,7 +250,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   const body = await request.json();
   const { service } = body;
 
-  if (!service || !['database', 'backup', 'rateLimiter', 'memory', 'disk'].includes(service)) {
+  if (!service || !['database', 'backup', 'rateLimiter', 'redis', 'memory', 'disk'].includes(service)) {
     return NextResponse.json(
       { error: 'Invalid service specified' },
       { status: 400 }
@@ -235,6 +268,9 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
       break;
     case 'rateLimiter':
       serviceStatus = checkRateLimiterHealth();
+      break;
+    case 'redis':
+      serviceStatus = await checkRedisHealth();
       break;
     case 'memory':
       serviceStatus = await getMemoryStatus();

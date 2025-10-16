@@ -202,12 +202,15 @@ model Audit {
   contractId      String
   projectId       String?
   status          AuditStatus @default(PENDING)
+  auditType       AuditType @default(STANDARD)
   overallScore    Int?     // 0-100 security score
   riskLevel       RiskLevel? @default(UNKNOWN)
   auditDuration   Int?     // Duration in seconds
   cost            Float?   // Cost in credits/USD
   startedAt       DateTime?
   completedAt     DateTime?
+  errorMessage    String?  // Error message if audit fails
+  metadata        String?  // JSON metadata for additional audit data
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   
@@ -286,6 +289,9 @@ model Subscription {
   stripeSubscriptionId String?
   currentPeriodStart DateTime?
   currentPeriodEnd   DateTime?
+  freeTrialStarted DateTime?
+  freeTrialEnds    DateTime?
+  isFreeTrial      Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   
@@ -330,6 +336,11 @@ enum AuditStatus {
   COMPLETED
   FAILED
   CANCELLED
+}
+
+enum AuditType {
+  STANDARD
+  OPENAI_AGENT
 }
 
 enum RiskLevel {

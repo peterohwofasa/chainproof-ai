@@ -1,0 +1,6 @@
+{
+  "contractCode": "pragma solidity ^0.8.0;\n\ncontract SimpleStorage {\n    uint256 private storedData;\n    \n    function set(uint256 x) public {\n        storedData = x;\n    }\n    \n    function get() public view returns (uint256) {\n        return storedData;\n    }\n}",
+  "contractName": "SimpleStorage",
+  "network": "ethereum",
+  "auditType": "OPENAI_AGENT"
+}

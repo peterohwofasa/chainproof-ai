@@ -68,8 +68,8 @@ class RateLimiter {
     const key = this.getKey(identifier, endpoint);
     const now = Date.now();
     
-    const limit = customLimit || safeConfig.RATE_LIMIT_MAX_REQUESTS;
-    const windowMs = customWindow || safeConfig.RATE_LIMIT_WINDOW_MS;
+    const limit = customLimit || Number(safeConfig.RATE_LIMIT_MAX_REQUESTS);
+    const windowMs = customWindow || Number(safeConfig.RATE_LIMIT_WINDOW_MS);
 
     // Initialize or get existing record
     if (!this.store[key] || this.store[key].resetTime < now) {
@@ -84,7 +84,7 @@ class RateLimiter {
     record.lastAccess = now;
 
     // Check if limit exceeded
-    if (record.count >= limit) {
+    if (Number(record.count) >= Number(limit)) {
       logger.logSecurityEvent('Rate limit exceeded', {
         identifier,
         key,
@@ -104,7 +104,7 @@ class RateLimiter {
 
     return {
       allowed: true,
-      remaining: limit - record.count,
+      remaining: Number(limit) - Number(record.count),
       resetTime: record.resetTime
     };
   }
@@ -136,7 +136,7 @@ class RateLimiter {
     
     return {
       count: record.count,
-      remaining: Math.max(0, limit - record.count),
+      remaining: Math.max(0, Number(limit) - Number(record.count)),
       resetTime: record.resetTime
     };
   }
@@ -193,7 +193,7 @@ export function withRateLimit(
       // Check rate limit
       const result = options?.customLimit 
         ? rateLimiter.checkLimit(request, options.customLimit, options.customWindow, options.endpoint)
-        : rateLimiter.checkLimit(request, undefined, undefined, options.endpoint);
+        : rateLimiter.checkLimit(request, undefined, undefined, options?.endpoint);
 
       // Add rate limit headers to response
       const response = await handler(request, ...args);

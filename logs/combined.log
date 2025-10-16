@@ -6,3 +6,24 @@
 {"timestamp":"2025-10-12T14:02:46.661Z","level":"INFO","message":"Health check performed","context":{"status":"degraded","responseTime":3,"services":[{"name":"database","status":"healthy"},{"name":"backup","status":"degraded"},{"name":"rateLimiter","status":"healthy"},{"name":"memory","status":"healthy"},{"name":"disk","status":"healthy"}]}}
 {"timestamp":"2025-10-12T15:43:50.388Z","level":"WARN","message":"Authentication attempt with non-existent user","context":{"email":"peterohwofasa@yahoo.com"}}
 {"timestamp":"2025-10-12T15:44:37.857Z","level":"WARN","message":"Authentication attempt with non-existent user","context":{"email":"peterohwofasa@yahoo.com"}}
+{"timestamp":"2025-10-14T21:38:47.881Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:38:47.967Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:38:48.225Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:38:48.537Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:38:48.947Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:38:49.885Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:38:51.674Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:38:53.847Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:38:55.974Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:38:58.015Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:39:00.152Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:39:02.264Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:39:03.667Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:39:03.880Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:39:04.011Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:39:04.412Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:39:04.430Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-14T21:39:06.450Z","level":"ERROR","message":"Redis Client Error:","context":{"code":"ECONNREFUSED"}}
+{"timestamp":"2025-10-16T08:55:42.747Z","level":"INFO","message":"User authenticated successfully","context":{"userId":"cmgt6ps8s0000ucl4ntphqjez","email":"peterohwofasa@yahoo.com"}}
+{"timestamp":"2025-10-16T10:35:14.935Z","level":"WARN","message":"Redis URL not configured, caching will be disabled"}
+{"timestamp":"2025-10-16T10:35:14.996Z","level":"INFO","message":"Health check performed","context":{"status":"unhealthy","responseTime":35,"services":[{"name":"database","status":"healthy"},{"name":"backup","status":"degraded"},{"name":"rateLimiter","status":"healthy"},{"name":"redis","status":"unhealthy"},{"name":"memory","status":"healthy"},{"name":"disk","status":"healthy"}]}}

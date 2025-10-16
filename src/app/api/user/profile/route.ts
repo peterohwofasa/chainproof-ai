@@ -16,14 +16,14 @@ export async function GET(request: NextRequest) {
     }
 
     const user = await db.user.findUnique({
-      where: { id: session.user.id },
+      where: { id: session.user.id! },
       select: {
         id: true,
         email: true,
         name: true,
         createdAt: true,
         lastLoginAt: true,
-        subscription: {
+        subscriptions: {
           select: {
             plan: true,
             creditsRemaining: true,

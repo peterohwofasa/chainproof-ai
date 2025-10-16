@@ -406,8 +406,8 @@ export default function TeamsPage() {
                           </div>
                           <div className="text-center">
                             <div className="text-2xl font-bold text-gray-900 dark:text-white">
-                              {selectedTeam.members.reduce((acc, member) => {
-                                return acc + (member.user.projects?.length || 0)
+                              {selectedTeam.projects.reduce((acc, project) => {
+                                return acc + (project._count.audits || 0)
                               }, 0)}
                             </div>
                             <div className="text-sm text-gray-600 dark:text-gray-400">

@@ -15,7 +15,7 @@ const plans = [
     description: 'Perfect for trying out ChainProof',
     icon: Star,
     features: [
-      '5 audit credits per month',
+      '7-day free trial with unlimited audits',
       'Basic vulnerability scanning',
       'Standard report format',
       'Community support',
@@ -294,7 +294,7 @@ export default function PricingPage() {
                   Is there a free trial?
                 </h3>
                 <p className="text-slate-600 dark:text-slate-400">
-                  Yes! The Professional plan includes a 14-day free trial with full access to all features.
+                  Yes! All new users get a 7-day free trial with unlimited audits. The Professional plan also includes a 14-day free trial with full access to all features.
                 </p>
               </div>
               

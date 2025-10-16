@@ -20,11 +20,11 @@ export async function GET(request: NextRequest) {
     const teams = await db.team.findMany({
       where: {
         OR: [
-          { ownerId: session.user.id },
+          { ownerId: session.user.id! },
           {
             members: {
               some: {
-                userId: session.user.id
+                userId: session.user.id!
               }
             }
           }
@@ -35,8 +35,7 @@ export async function GET(request: NextRequest) {
           select: {
             id: true,
             name: true,
-            email: true,
-            avatar: true
+            email: true
           }
         },
         members: {
@@ -45,8 +44,7 @@ export async function GET(request: NextRequest) {
               select: {
                 id: true,
                 name: true,
-                email: true,
-                avatar: true
+                email: true
               }
             }
           }
@@ -131,8 +129,7 @@ export async function POST(request: NextRequest) {
           select: {
             id: true,
             name: true,
-            email: true,
-            avatar: true
+            email: true
           }
         },
         members: {
@@ -141,8 +138,7 @@ export async function POST(request: NextRequest) {
               select: {
                 id: true,
                 name: true,
-                email: true,
-                avatar: true
+                email: true
               }
             }
           }

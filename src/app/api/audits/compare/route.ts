@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
     const afterVulns = groupVulnerabilities(afterAudit.vulnerabilities)
 
     // Calculate changes
-    const scoreChange = afterAudit.overallScore - beforeAudit.overallScore
+    const scoreChange = (afterAudit.overallScore || 0) - (beforeAudit.overallScore || 0)
     const riskLevelChange = afterAudit.riskLevel
 
     // Calculate vulnerability changes
@@ -120,10 +120,10 @@ export async function POST(request: NextRequest) {
       return vulns.find(v => v.severity === severity)?.count || 0
     }
 
-    let vulnerabilitiesFixed = 0
-    let newVulnerabilities = 0
+    let vulnerabilitiesFixed = 0;
+    let newVulnerabilities = 0;
 
-    ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'].forEach(severity => {
+    (['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'] as const).forEach((severity: string) => {
       const beforeCount = getVulnerabilityCount(beforeVulns, severity)
       const afterCount = getVulnerabilityCount(afterVulns, severity)
       

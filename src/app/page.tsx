@@ -1,12 +1,23 @@
-import { HeroSection, FeaturesSection, StatsSection, CTASection } from '@/components/hero-section'
+import { 
+  HeroSection, 
+  SocialProofSection,
+  FeaturesSection, 
+  DemoSection,
+  StatsSection, 
+  PricingPreviewSection,
+  CTASection 
+} from '@/components/hero-section'
 
 export default function Home() {
   return (
-    <div className="min-h-screen">
+    <main>
       <HeroSection />
+      <SocialProofSection />
       <FeaturesSection />
+      <DemoSection />
       <StatsSection />
+      <PricingPreviewSection />
       <CTASection />
-    </div>
+    </main>
   )
 }

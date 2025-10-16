@@ -17,19 +17,25 @@ export function Navigation() {
     { name: 'Home', href: '/' },
     { name: 'Audit', href: '/audit' },
     { name: 'Dashboard', href: '/dashboard', protected: true },
+    { name: 'Pricing', href: '/pricing' }
+  ]
+
+  // Additional navigation items for mobile menu only
+  const mobileOnlyNavigation = [
     { name: 'Teams', href: '/teams', protected: true },
     { name: 'Analytics', href: '/analytics', protected: true },
-    { name: 'API Docs', href: '/api-docs', protected: true },
-    { name: 'Company', href: '/company' },
+    { name: 'Settings', href: '/settings', protected: true },
+    { name: 'Documentation', href: '/docs' },
     { name: 'About', href: '/about' },
     { name: 'Blog', href: '/blog' },
-    { name: 'Careers', href: '/careers' },
-    { name: 'Settings', href: '/settings', protected: true },
-    { name: 'Pricing', href: '/pricing' },
-    { name: 'Documentation', href: '/docs' }
+    { name: 'Support', href: '/support' }
   ]
 
   const filteredNavigation = navigation.filter(item => 
+    !item.protected || session?.user
+  )
+
+  const filteredMobileNavigation = mobileOnlyNavigation.filter(item => 
     !item.protected || session?.user
   )
 
@@ -105,6 +111,7 @@ export function Navigation() {
               </SheetTrigger>
               <SheetContent side="right" className="w-[300px] sm:w-[400px]">
                 <div className="flex flex-col space-y-4 mt-8">
+                  {/* Main Navigation */}
                   {filteredNavigation.map((item) => (
                     <Link
                       key={item.name}
@@ -115,6 +122,23 @@ export function Navigation() {
                       {item.name}
                     </Link>
                   ))}
+                  
+                  {/* Additional Mobile Navigation */}
+                  <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                    <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+                      More
+                    </div>
+                    {filteredMobileNavigation.map((item) => (
+                      <Link
+                        key={item.name}
+                        href={item.href}
+                        className="text-base font-medium text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white transition-colors block py-1"
+                        onClick={() => setIsOpen(false)}
+                      >
+                        {item.name}
+                      </Link>
+                    ))}
+                  </div>
                   
                   <div className="pt-4 border-t">
                     {session?.user ? (

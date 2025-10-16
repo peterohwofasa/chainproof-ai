@@ -8,6 +8,7 @@ export function Footer() {
     product: [
       { name: 'Audit', href: '/audit', icon: <Shield className="w-4 h-4" /> },
       { name: 'Dashboard', href: '/dashboard', icon: <Shield className="w-4 h-4" /> },
+      { name: 'Teams', href: '/teams', icon: <Shield className="w-4 h-4" /> },
       { name: 'Pricing', href: '/pricing', icon: <Shield className="w-4 h-4" /> },
     ],
     resources: [
@@ -28,6 +29,11 @@ export function Footer() {
         href: '/docs', 
         icon: <BookOpen className="w-4 h-4" />,
         description: 'Getting started'
+      },
+      { 
+        name: 'Analytics', 
+        href: '/analytics', 
+        icon: <Shield className="w-4 h-4" />
       },
     ],
     company: [

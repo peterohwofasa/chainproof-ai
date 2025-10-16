@@ -99,7 +99,7 @@ export default function QuickStart() {
                     <div>
                       <h4 className="font-semibold text-blue-800 dark:text-blue-200">Free Tier Benefits</h4>
                       <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
-                        Free accounts include 5 audit credits per month, access to basic reports, and community support.
+                        All new accounts include a 7-day free trial with unlimited audits, access to basic reports, and community support.
                       </p>
                     </div>
                   </div>

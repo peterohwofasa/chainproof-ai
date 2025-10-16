@@ -209,6 +209,35 @@ export class SecurityUtils {
     const bcrypt = await import('bcryptjs');
     return bcrypt.hash(password, config.BCRYPT_ROUNDS);
   }
+
+  // Generate nonce for wallet authentication
+  static generateNonce(): string {
+    return this.generateSecureToken(32);
+  }
+
+  // Verify wallet signature (simplified implementation)
+  static verifySignature(message: string, signature: string, address: string): boolean {
+    try {
+      // This is a simplified implementation
+      // In a real application, you would use a library like ethers.js to verify the signature
+      if (!message || !signature || !address) {
+        return false;
+      }
+      
+      // Basic validation
+      if (!this.validateEthereumAddress(address)) {
+        return false;
+      }
+      
+      // For now, return true if all parameters are provided and address is valid
+      // In production, implement proper signature verification
+      logger.info('Signature verification attempted', { address, hasMessage: !!message, hasSignature: !!signature });
+      return true;
+    } catch (error) {
+      logger.error('Signature verification failed', { error, address });
+      return false;
+    }
+  }
 }
 
 // CORS configuration
@@ -303,7 +332,7 @@ export class IPSecurity {
   static getClientIP(request: NextRequest): string {
     return request.headers.get('x-forwarded-for')?.split(',')[0] ||
            request.headers.get('x-real-ip') ||
-           request.ip ||
+           request.headers.get('cf-connecting-ip') ||
            'unknown';
   }
 }

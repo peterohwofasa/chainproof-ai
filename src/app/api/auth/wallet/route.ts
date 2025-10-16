@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { AuthService, AuthError, createAuthResponse } from '@/lib/auth'
+import { SecurityUtils } from '@/lib/security'
 import { z } from 'zod'
 
 const walletAuthSchema = z.object({
@@ -55,20 +56,31 @@ export async function POST(request: NextRequest) {
       })
 
       // Refetch user with subscription
-      user = await db.user.findUnique({
+      const updatedUser = await db.user.findUnique({
         where: { id: user.id },
         include: {
           subscriptions: true,
         },
-      })!
+      })
+      
+      if (!updatedUser) {
+        return NextResponse.json(
+          { error: 'User not found after creation' },
+          { status: 500 }
+        )
+      }
+      
+      user = updatedUser
     }
 
     // Create auth response
+    const token = SecurityUtils.generateSecureToken(64)
     const response = createAuthResponse({
-      userId: user.id,
+      id: user.id,
       email: user.email,
+      name: user.name,
       walletAddress: user.walletAddress || undefined,
-    })
+    }, token)
 
     return NextResponse.json(response)
   } catch (error) {
@@ -76,7 +88,7 @@ export async function POST(request: NextRequest) {
 
     if (error instanceof z.ZodError) {
       return NextResponse.json(
-        { error: 'Validation failed', details: error.errors },
+        { error: 'Validation failed', details: error.issues },
         { status: 400 }
       )
     }

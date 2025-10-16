@@ -5,7 +5,7 @@ import { db } from '@/lib/db'
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { teamId: string, memberId: string } }
+  { params }: { params: Promise<{ teamId: string, memberId: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -17,7 +17,7 @@ export async function DELETE(
       )
     }
 
-    const { teamId, memberId } = params
+    const { teamId, memberId } = await params
 
     // Check if user has permission to remove members (owner or admin)
     const teamMember = await db.teamMember.findFirst({

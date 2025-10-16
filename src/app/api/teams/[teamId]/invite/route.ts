@@ -7,7 +7,7 @@ import { v4 as uuidv4 } from 'uuid'
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { teamId: string } }
+  { params }: { params: Promise<{ teamId: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -19,7 +19,7 @@ export async function POST(
       )
     }
 
-    const { teamId } = params
+    const { teamId } = await params
     const body = await request.json()
     const { email, role } = body
 

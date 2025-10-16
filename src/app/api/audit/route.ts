@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '@/lib/auth'
-import { db } from '@/lib/db'
+import { authOptions } from '../../../lib/auth'
+import { db } from '../../../lib/db'
 import ZAI from 'z-ai-web-dev-sdk'
-import { emitAuditProgress, emitAuditCompleted, emitAuditError } from '@/lib/socket'
-import { auditRequestSchema, validateContractCode } from '@/lib/validations'
-import { withAuth, withRateLimit, sanitizeRequestBody, withSecurityHeaders } from '@/lib/middleware'
-import { withErrorHandler, ValidationError, AuthenticationError, RateLimitError, ExternalServiceError } from '@/lib/error-handler'
-import { createBlockchainExplorer, detectNetwork, SUPPORTED_NETWORKS } from '@/lib/blockchain-explorer'
-import { staticAnalyzer } from '@/lib/static-analysis'
-import { vulnerabilityDatabase } from '@/lib/vulnerability-database'
+import { emitAuditProgress, emitAuditCompleted, emitAuditError } from '../../../lib/socket'
+import { auditRequestSchema, validateContractCode } from '../../../lib/validations'
+import { withAuth, withRateLimit, sanitizeRequestBody, withSecurityHeaders } from '../../../lib/middleware'
+import { withErrorHandler, ValidationError, AuthenticationError, RateLimitError, ExternalServiceError } from '../../../lib/error-handler'
+import { createBlockchainExplorer, detectNetwork, SUPPORTED_NETWORKS } from '../../../lib/blockchain-explorer'
+import { staticAnalyzer } from '../../../lib/static-analysis'
+import { vulnerabilityDatabase } from '../../../lib/vulnerability-database'
 
 // Get socket.io instance from the server
 let io: any = null
@@ -55,34 +55,40 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   // Validate request schema
   const validationResult = auditRequestSchema.safeParse(sanitizedBody)
   if (!validationResult.success) {
-    throw new ValidationError('Validation failed', validationResult.error.errors.map(e => e.message).join(', '))
+    throw new ValidationError('Validation failed', validationResult.error.issues.map(e => e.message).join(', '))
   }
 
-  const { contractCode, contractAddress, contractName, network } = validationResult.data
+  const { contractCode, contractAddress, contractName, network, auditType } = validationResult.data
+
+  // If OpenAI agent audit is requested, redirect to the OpenAI endpoint
+  if (auditType === 'OPENAI_AGENT') {
+    // Forward the request to the OpenAI agent endpoint
+    const openAIRequest = new NextRequest(new URL('/api/audit/openai', request.url), {
+      method: 'POST',
+      headers: request.headers,
+      body: JSON.stringify({ contractCode, contractAddress, contractName, network })
+    })
+    
+    // Import and call the OpenAI route handler
+    const { POST: openAIHandler } = await import('./openai/route')
+    return await openAIHandler(openAIRequest)
+  }
 
   let finalContractCode = contractCode
   let finalContractName = contractName
-  let contractNetwork = network || 'ethereum'
+  let contractNetwork: keyof typeof SUPPORTED_NETWORKS = (network as keyof typeof SUPPORTED_NETWORKS) || 'ethereum'
   let compilerVersion: string | undefined
   let optimizationEnabled: boolean | undefined
 
   // If contract address is provided, fetch source code from blockchain explorer
   if (contractAddress && !contractCode) {
-    if (socketIO) {
-      emitAuditProgress(socketIO, audit.id, {
-        auditId: audit.id,
-        status: 'FETCHING',
-        progress: 15,
-        message: 'Fetching contract source code...',
-        currentStep: 'Source Code Retrieval',
-        estimatedTimeRemaining: 110,
-      })
-    }
-
     try {
       // Detect network if not specified
       if (!network) {
-        contractNetwork = await detectNetwork(contractAddress)
+        const detectedNetwork = await detectNetwork(contractAddress)
+        if (detectedNetwork in SUPPORTED_NETWORKS) {
+          contractNetwork = detectedNetwork as keyof typeof SUPPORTED_NETWORKS
+        }
       }
 
       const explorer = createBlockchainExplorer(contractNetwork)
@@ -99,16 +105,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
         throw new ValidationError('Invalid contract code fetched from blockchain', codeValidation.errors.join(', '))
       }
 
-      if (socketIO) {
-        emitAuditProgress(socketIO, audit.id, {
-          auditId: audit.id,
-          status: 'FETCHED',
-          progress: 25,
-          message: `Source code fetched from ${SUPPORTED_NETWORKS[contractNetwork].name}`,
-          currentStep: 'Source Code Retrieved',
-          estimatedTimeRemaining: 100,
-        })
-      }
+      // Socket emission will be done after audit creation
     } catch (error) {
       if (error instanceof ValidationError || error instanceof ExternalServiceError) {
         throw error
@@ -125,7 +122,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     }
   }
 
-  // Check user's subscription credits
+  // Check user's subscription and free trial status
   const subscription = await db.subscription.findFirst({
     where: {
       userId: session.user.id,
@@ -133,8 +130,27 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     }
   })
 
-  if (!subscription || subscription.creditsRemaining <= 0) {
-    throw new ValidationError('Insufficient credits. Please upgrade your plan.')
+  if (!subscription) {
+    throw new ValidationError('No active subscription found. Please contact support.')
+  }
+
+  // Check if user is in free trial period
+  const now = new Date()
+  const subscriptionWithTrial = subscription as any
+  const isInFreeTrial = subscriptionWithTrial.isFreeTrial && 
+                       subscriptionWithTrial.freeTrialEnds && 
+                       now < subscriptionWithTrial.freeTrialEnds
+
+  // If not in free trial, check credits
+  if (!isInFreeTrial && subscription.creditsRemaining <= 0) {
+    const daysRemaining = subscriptionWithTrial.freeTrialEnds ? 
+      Math.ceil((subscriptionWithTrial.freeTrialEnds.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : 0
+    
+    if (subscriptionWithTrial.isFreeTrial && daysRemaining <= 0) {
+      throw new ValidationError('Your 7-day free trial has expired. Please upgrade your plan to continue auditing.')
+    } else {
+      throw new ValidationError('You have no credits remaining. Please upgrade your plan to continue auditing.')
+    }
   }
 
   // Create contract record
@@ -158,13 +174,15 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     },
   })
 
-  // Deduct one credit
-  await db.subscription.update({
-    where: { id: subscription.id },
-    data: {
-      creditsRemaining: subscription.creditsRemaining - 1
-    }
-  })
+  // Deduct one credit (only if not in free trial)
+  if (!isInFreeTrial) {
+    await db.subscription.update({
+      where: { id: subscription.id },
+      data: {
+        creditsRemaining: subscription.creditsRemaining - 1
+      }
+    })
+  }
 
   // Emit initial progress
   if (socketIO) {
@@ -279,10 +297,29 @@ async function analyzeContractWithProgress(
   ]
 
   try {
-    const zai = await ZAI.create()
+    // Initialize ZAI SDK with error handling
+    let zai: any = null
+    let aiAvailable = false
+    
+    try {
+      // Check if ZAI API key is available and valid
+      const zaiApiKey = process.env.ZAI_API_KEY
+      if (!zaiApiKey || zaiApiKey === 'development-placeholder-key') {
+        console.warn('ZAI API key not configured, using fallback analysis')
+        aiAvailable = false
+      } else {
+        zai = await ZAI.create()
+        aiAvailable = true
+      }
+    } catch (zaiError) {
+      console.warn('ZAI SDK initialization failed, using fallback analysis:', zaiError)
+      aiAvailable = false
+    }
 
     // Perform static analysis first
     let staticAnalysisResults: any[] = []
+    let consensusAnalysis: any = null
+    
     try {
       if (socketIO) {
         emitAuditProgress(socketIO, auditId, {
@@ -296,7 +333,7 @@ async function analyzeContractWithProgress(
       }
       
       staticAnalysisResults = await staticAnalyzer.analyzeContract(contractCode, ['slither', 'mythril', 'custom'])
-      const consensusAnalysis = await staticAnalyzer.getConsensusAnalysis(staticAnalysisResults)
+      consensusAnalysis = await staticAnalyzer.getConsensusAnalysis(staticAnalysisResults)
       
       if (socketIO) {
         emitAuditProgress(socketIO, auditId, {
@@ -309,7 +346,26 @@ async function analyzeContractWithProgress(
         })
       }
     } catch (staticError) {
-      console.warn('Static analysis failed, continuing with AI analysis:', staticError)
+      console.warn('Static analysis failed, continuing with pattern-based analysis:', staticError)
+      
+      // Fallback to vulnerability database pattern matching
+      const patternResults = vulnerabilityDatabase.enhanceVulnerabilityDetection(contractCode)
+      consensusAnalysis = {
+        vulnerabilities: patternResults.map(result => ({
+          title: result.pattern.title,
+          description: result.pattern.description,
+          severity: result.pattern.severity,
+          category: result.pattern.category,
+          lineNumbers: result.matches.map(m => m.line),
+          codeSnippet: result.matches[0]?.snippet || '',
+          recommendation: result.pattern.recommendations[0] || 'Review this vulnerability',
+          cweId: result.pattern.cweId,
+          swcId: result.pattern.swcId,
+          confidence: result.matches[0]?.confidence || 0.5
+        })),
+        overallScore: Math.max(20, 100 - (patternResults.length * 15)),
+        riskLevel: patternResults.length > 3 ? 'HIGH' : patternResults.length > 1 ? 'MEDIUM' : 'LOW'
+      }
     }
 
     // Emit progress steps
@@ -317,7 +373,10 @@ async function analyzeContractWithProgress(
       if (socketIO) {
         emitAuditProgress(socketIO, auditId, {
           auditId,
-          ...step,
+          status: step.status as 'STARTED' | 'ANALYZING' | 'DETECTING' | 'GENERATING_REPORT' | 'COMPLETED' | 'ERROR' | 'FETCHING',
+          progress: step.progress,
+          message: step.message,
+          currentStep: step.currentStep,
           estimatedTimeRemaining: Math.max(30, 120 - (step.progress * 1.2)),
         })
       }
@@ -438,55 +497,102 @@ Return the analysis in valid JSON format:
   ]
 }`
 
-    const completion = await zai.chat.completions.create({
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a smart contract security expert specializing in Solidity vulnerability detection. Provide thorough, actionable security analysis.'
-        },
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
-      temperature: 0.1,
-      max_tokens: 4000,
-    })
+    let analysisResult: any
 
-    const analysisText = completion.choices[0]?.message?.content
-    
-    if (!analysisText) {
-      throw new Error('No analysis received from AI')
+    // Perform AI analysis if available, otherwise use enhanced pattern matching
+    if (aiAvailable && zai) {
+      try {
+        if (socketIO) {
+          emitAuditProgress(socketIO, auditId, {
+            auditId,
+            status: 'ANALYZING',
+            progress: 80,
+            message: 'Running AI-powered security analysis...',
+            currentStep: 'AI Analysis',
+            estimatedTimeRemaining: 40,
+          })
+        }
+
+        const completion = await zai.chat.completions.create({
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a smart contract security expert specializing in Solidity vulnerability detection. Provide thorough, actionable security analysis.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          temperature: 0.1,
+          max_tokens: 4000,
+        })
+
+        const analysisText = completion.choices[0]?.message?.content
+        
+        if (!analysisText) {
+          throw new Error('No analysis received from AI')
+        }
+
+        // Try to parse JSON response
+        try {
+          // Extract JSON from the response (in case there's extra text)
+          const jsonMatch = analysisText.match(/\{[\s\S]*\}/)
+          if (jsonMatch) {
+            analysisResult = JSON.parse(jsonMatch[0])
+          } else {
+            throw new Error('No JSON found in response')
+          }
+        } catch (parseError) {
+          console.warn('Failed to parse AI response, falling back to pattern analysis:', parseError)
+          throw new Error('AI response parsing failed')
+        }
+      } catch (aiError) {
+        console.warn('AI analysis failed, using enhanced pattern matching:', aiError)
+        aiAvailable = false
+      }
     }
 
-    // Try to parse JSON response
-    let analysisResult
-    try {
-      // Extract JSON from the response (in case there's extra text)
-      const jsonMatch = analysisText.match(/\{[\s\S]*\}/)
-      if (jsonMatch) {
-        analysisResult = JSON.parse(jsonMatch[0])
-      } else {
-        throw new Error('No JSON found in response')
+    // Fallback to enhanced pattern matching if AI is not available
+    if (!aiAvailable || !analysisResult) {
+      if (socketIO) {
+        emitAuditProgress(socketIO, auditId, {
+          auditId,
+          status: 'ANALYZING',
+          progress: 80,
+          message: 'Running enhanced pattern-based analysis...',
+          currentStep: 'Pattern Analysis',
+          estimatedTimeRemaining: 40,
+        })
       }
-    } catch (parseError) {
-      // Fallback to a basic analysis if JSON parsing fails
+
+      // Use consensus analysis if available, otherwise run pattern matching
+      if (!consensusAnalysis) {
+        const patternResults = vulnerabilityDatabase.enhanceVulnerabilityDetection(contractCode)
+        consensusAnalysis = {
+          vulnerabilities: patternResults.map(result => ({
+            title: result.pattern.title,
+            description: result.pattern.description,
+            severity: result.pattern.severity,
+            category: result.pattern.category,
+            lineNumbers: result.matches.map(m => m.line),
+            codeSnippet: result.matches[0]?.snippet || '',
+            recommendation: result.pattern.recommendations[0] || 'Review this vulnerability',
+            cweId: result.pattern.cweId,
+            swcId: result.pattern.swcId,
+            confidence: result.matches[0]?.confidence || 0.5
+          })),
+          overallScore: Math.max(20, 100 - (patternResults.length * 15)),
+          riskLevel: patternResults.length > 3 ? 'HIGH' : patternResults.length > 1 ? 'MEDIUM' : 'LOW'
+        }
+      }
+
       analysisResult = {
-        overallScore: 50,
-        riskLevel: 'MEDIUM',
-        vulnerabilities: [
-          {
-            title: 'Analysis Error',
-            description: 'Unable to parse AI analysis. Please review the contract manually.',
-            severity: 'INFO',
-            category: 'Analysis',
-            lineNumbers: [],
-            codeSnippet: '',
-            recommendation: 'Manual security review recommended',
-            cweId: null,
-            swcId: null
-          }
-        ]
+        overallScore: consensusAnalysis.overallScore,
+        riskLevel: consensusAnalysis.riskLevel,
+        vulnerabilities: consensusAnalysis.vulnerabilities,
+        analysisMethod: aiAvailable ? 'AI_ENHANCED' : 'PATTERN_BASED',
+        note: aiAvailable ? 'Analysis enhanced with AI insights' : 'Analysis based on comprehensive pattern matching and static analysis'
       }
     }
 
@@ -497,16 +603,73 @@ Return the analysis in valid JSON format:
       duration,
     }
   } catch (error) {
-    console.error('AI analysis error:', error)
+    console.error('Analysis error:', error)
     
-    // Emit error
+    // Provide comprehensive fallback analysis instead of throwing error
     if (socketIO) {
-      emitAuditError(socketIO, auditId, 'AI analysis service unavailable')
+      emitAuditProgress(socketIO, auditId, {
+        auditId,
+        status: 'ANALYZING',
+        progress: 90,
+        message: 'Completing analysis with fallback methods...',
+        currentStep: 'Fallback Analysis',
+        estimatedTimeRemaining: 20,
+      })
     }
+
+    // Generate fallback analysis using vulnerability database
+    const patternResults = vulnerabilityDatabase.enhanceVulnerabilityDetection(contractCode)
     
-    // Return a fallback analysis
+    // Combine pattern results for comprehensive analysis
+    const allVulnerabilities = [
+      ...patternResults.map(result => ({
+        title: result.pattern.title,
+        description: result.pattern.description,
+        severity: result.pattern.severity,
+        category: result.pattern.category,
+        lineNumbers: result.matches.map(m => m.line),
+        codeSnippet: result.matches[0]?.snippet || '',
+        recommendation: result.pattern.recommendations[0] || 'Review this vulnerability',
+        cweId: result.pattern.cweId,
+        swcId: result.pattern.swcId,
+        confidence: result.matches[0]?.confidence || 0.5
+      })),
+
+    ]
+
+    // Remove duplicates based on title and category
+    const uniqueVulnerabilities = allVulnerabilities.filter((vuln, index, self) => 
+      index === self.findIndex(v => v.title === vuln.title && v.category === vuln.category)
+    )
+
     const duration = Math.floor((Date.now() - startTime) / 1000)
+    const criticalCount = uniqueVulnerabilities.filter(v => v.severity === 'CRITICAL').length
+    const highCount = uniqueVulnerabilities.filter(v => v.severity === 'HIGH').length
+    const mediumCount = uniqueVulnerabilities.filter(v => v.severity === 'MEDIUM').length
     
-    throw new ExternalServiceError('AI analysis service temporarily unavailable')
+    // Calculate risk level and score based on vulnerability counts
+    let riskLevel = 'LOW'
+    let overallScore = 85
+    
+    if (criticalCount > 0) {
+      riskLevel = 'CRITICAL'
+      overallScore = Math.max(10, 40 - (criticalCount * 10))
+    } else if (highCount > 2) {
+      riskLevel = 'HIGH'
+      overallScore = Math.max(20, 60 - (highCount * 8))
+    } else if (highCount > 0 || mediumCount > 3) {
+      riskLevel = 'MEDIUM'
+      overallScore = Math.max(40, 75 - (highCount * 5) - (mediumCount * 3))
+    }
+
+    return {
+      overallScore,
+      riskLevel,
+      vulnerabilities: uniqueVulnerabilities,
+      duration,
+      analysisMethod: 'FALLBACK_PATTERN_BASED',
+      note: 'Analysis completed using comprehensive pattern matching. For enhanced analysis, please ensure AI service is properly configured.',
+      warning: 'This analysis uses pattern matching only. Manual review recommended for critical applications.'
+    }
   }
 }

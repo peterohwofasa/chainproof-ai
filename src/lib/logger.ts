@@ -78,47 +78,55 @@ class Logger {
     }
   }
 
-  error(message: string, context?: any, userId?: string, requestId?: string) {
+  error(message: string, context?: any, userId?: string, requestId?: string, ip?: string, userAgent?: string) {
     this.writeLog({
       timestamp: new Date().toISOString(),
       level: LogLevel.ERROR,
       message,
       context,
       userId,
-      requestId
+      requestId,
+      ip,
+      userAgent
     });
   }
 
-  warn(message: string, context?: any, userId?: string, requestId?: string) {
+  warn(message: string, context?: any, userId?: string, requestId?: string, ip?: string, userAgent?: string) {
     this.writeLog({
       timestamp: new Date().toISOString(),
       level: LogLevel.WARN,
       message,
       context,
       userId,
-      requestId
+      requestId,
+      ip,
+      userAgent
     });
   }
 
-  info(message: string, context?: any, userId?: string, requestId?: string) {
+  info(message: string, context?: any, userId?: string, requestId?: string, ip?: string, userAgent?: string) {
     this.writeLog({
       timestamp: new Date().toISOString(),
       level: LogLevel.INFO,
       message,
       context,
       userId,
-      requestId
+      requestId,
+      ip,
+      userAgent
     });
   }
 
-  debug(message: string, context?: any, userId?: string, requestId?: string) {
+  debug(message: string, context?: any, userId?: string, requestId?: string, ip?: string, userAgent?: string) {
     this.writeLog({
       timestamp: new Date().toISOString(),
       level: LogLevel.DEBUG,
       message,
       context,
       userId,
-      requestId
+      requestId,
+      ip,
+      userAgent
     });
   }
 

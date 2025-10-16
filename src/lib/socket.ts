@@ -2,17 +2,38 @@ import { Server } from 'socket.io';
 
 interface AuditProgress {
   auditId: string;
-  status: 'STARTED' | 'ANALYZING' | 'DETECTING' | 'GENERATING_REPORT' | 'COMPLETED' | 'ERROR';
+  status: 'STARTED' | 'ANALYZING' | 'DETECTING' | 'GENERATING_REPORT' | 'COMPLETED' | 'ERROR' | 'FETCHING';
   progress: number;
   message: string;
   currentStep?: string;
   estimatedTimeRemaining?: number;
 }
 
+// Helper functions to emit events to specific audit rooms
+export const emitAuditProgress = (io: Server, auditId: string, progress: AuditProgress) => {
+  io.to(`audit-${auditId}`).emit('audit-progress', progress);
+};
+
+export const emitAuditCompleted = (io: Server, auditId: string, result: any) => {
+  io.to(`audit-${auditId}`).emit('audit-completed', {
+    auditId,
+    result,
+    timestamp: new Date().toISOString(),
+  });
+};
+
+export const emitAuditError = (io: Server, auditId: string, error: string) => {
+  io.to(`audit-${auditId}`).emit('audit-error', {
+    auditId,
+    error,
+    timestamp: new Date().toISOString(),
+  });
+};
+
 export const setupSocket = (io: Server) => {
   io.on('connection', (socket) => {
     console.log('Client connected:', socket.id);
-    
+
     // Join audit room for real-time updates
     socket.on('join-audit', (auditId: string) => {
       socket.join(`audit-${auditId}`);
@@ -61,19 +82,4 @@ export const setupSocket = (io: Server) => {
       timestamp: new Date().toISOString(),
     });
   });
-};
-
-// Helper function to emit audit progress
-export const emitAuditProgress = (io: Server, auditId: string, progress: AuditProgress) => {
-  io.to(`audit-${auditId}`).emit('audit-progress', progress);
-};
-
-// Helper function to emit audit completion
-export const emitAuditCompleted = (io: Server, auditId: string, result: any) => {
-  io.to(`audit-${auditId}`).emit('audit-completed', { auditId, result });
-};
-
-// Helper function to emit audit error
-export const emitAuditError = (io: Server, auditId: string, error: string) => {
-  io.to(`audit-${auditId}`).emit('audit-error', { auditId, error });
 };

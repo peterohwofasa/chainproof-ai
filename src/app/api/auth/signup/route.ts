@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs'
 import { db } from '@/lib/db'
 import { signupSchema } from '@/lib/validations'
 import { sanitizeRequestBody } from '@/lib/middleware'
+import { SecurityUtils } from '@/lib/security'
 
 async function handler(request: NextRequest) {
   try {
@@ -27,7 +28,7 @@ async function handler(request: NextRequest) {
       return NextResponse.json(
         { 
           error: 'Validation failed', 
-          details: validationResult.error.errors.map(e => e.message)
+          details: validationResult.error.issues.map(e => e.message)
         },
         { status: 400 }
       )
@@ -72,14 +73,21 @@ async function handler(request: NextRequest) {
       }
     })
 
-    // Create default subscription
+    // Create default subscription with 7-day free trial
+    const freeTrialStarted = new Date()
+    const freeTrialEnds = new Date()
+    freeTrialEnds.setDate(freeTrialStarted.getDate() + 7) // 7 days from now
+
     await db.subscription.create({
       data: {
         userId: user.id,
         plan: 'FREE',
         status: 'ACTIVE',
-        creditsRemaining: 5, // Free tier gets 5 audit credits
-      }
+        creditsRemaining: 999, // Generous credits during free trial
+        isFreeTrial: true,
+        freeTrialStarted,
+        freeTrialEnds,
+      } as any
     })
 
     return NextResponse.json({

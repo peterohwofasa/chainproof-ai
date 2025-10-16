@@ -23,12 +23,12 @@ export async function POST(request: NextRequest) {
 
     // Generate backup codes
     const backupCodes = Array.from({ length: 10 }, () => 
-      authenticator.generateToken(secret).slice(0, 8)
+      Math.random().toString(36).substring(2, 10).toUpperCase()
     )
 
     // Store secret temporarily (not enabled yet)
     await db.user.update({
-      where: { id: session.user.id },
+      where: { id: session.user.id! },
       data: {
         // You might want to add a temporary field for this
         // For now, we'll return it in the response

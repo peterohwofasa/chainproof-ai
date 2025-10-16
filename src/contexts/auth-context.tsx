@@ -13,6 +13,9 @@ interface User {
     plan: string
     creditsRemaining: number
     status: string
+    isFreeTrial?: boolean
+    freeTrialEnds?: string
+    freeTrialStarted?: string
   }
   auditCount: number
 }

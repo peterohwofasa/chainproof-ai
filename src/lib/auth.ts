@@ -1,10 +1,22 @@
 import { NextAuthOptions } from 'next-auth'
 import CredentialsProvider from 'next-auth/providers/credentials'
 import { PrismaAdapter } from '@auth/prisma-adapter'
-import { db } from '@/lib/db'
-import { config } from '@/lib/config'
-import { logger } from '@/lib/logger'
-import { SecurityUtils } from '@/lib/security'
+import { db } from './db'
+import { config } from './config'
+import { logger } from './logger'
+import { SecurityUtils } from './security'
+
+// Extend NextAuth types
+declare module 'next-auth' {
+  interface Session {
+    user: {
+      id: string
+      name?: string | null
+      email?: string | null
+      image?: string | null
+    }
+  }
+}
 
 export class AuthError extends Error {
   constructor(message: string, public code?: string) {
@@ -51,6 +63,22 @@ export class AuthService {
 
     return user
   }
+
+  static async hashPassword(password: string): Promise<string> {
+    return await SecurityUtils.hashPassword(password)
+  }
+
+  static verifySignature(message: string, signature: string, address: string): boolean {
+    return SecurityUtils.verifySignature(message, signature, address)
+  }
+
+  static generateNonce(): string {
+    return SecurityUtils.generateNonce()
+  }
+
+  static createWalletNonceMessage(nonce: string): string {
+    return `Please sign this message to authenticate with ChainProof AI.\n\nNonce: ${nonce}\nTimestamp: ${new Date().toISOString()}`
+  }
 }
 
 export function createAuthResponse(user: any, token: string) {
@@ -64,17 +92,30 @@ export function createAuthResponse(user: any, token: string) {
   }
 }
 
-export function requireAuth(handler: (req: Request, ...args: any[]) => Promise<Response> | Response) {
-  return async (req: Request, ...args: any[]) => {
-    // This is a simplified version - in production you'd verify JWT tokens
-    const authHeader = req.headers.get('authorization')
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new AuthError('Authentication required', 'AUTH_REQUIRED')
-    }
+export async function requireAuth(req: Request): Promise<{ userId: string }> {
+  // This is a simplified version - in production you'd verify JWT tokens
+  const authHeader = req.headers.get('authorization')
+  
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    throw new AuthError('Authentication required', 'AUTH_REQUIRED')
+  }
 
-    // Token validation logic here
-    return handler(req, ...args)
+  const token = authHeader.substring(7) // Remove 'Bearer ' prefix
+  
+  // In a real implementation, you would verify the JWT token here
+  // For now, we'll return a mock user ID
+  // You should implement proper JWT verification with your secret key
+  
+  try {
+    // Mock implementation - replace with actual JWT verification
+    if (!token || token.length < 10) {
+      throw new AuthError('Invalid token', 'INVALID_TOKEN')
+    }
+    
+    // Return mock user data - in production, extract from verified JWT
+    return { userId: 'mock-user-id' }
+  } catch (error) {
+    throw new AuthError('Invalid token', 'INVALID_TOKEN')
   }
 }
 
@@ -192,7 +233,6 @@ export const authOptions: NextAuthOptions = {
   },
   pages: {
     signIn: '/login',
-    signUp: '/signup',
     error: '/login',
   },
   secret: config.NEXTAUTH_SECRET,
