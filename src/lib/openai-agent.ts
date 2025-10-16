@@ -217,8 +217,26 @@ export const formatOpenAIAuditForChainProof = (auditResult: OpenAIAuditResult) =
   const auditText = auditResult.output_text;
   
   // Extract vulnerabilities (this is a simplified parser - could be enhanced)
-  const vulnerabilities = [];
-  const gasOptimizations = [];
+  const vulnerabilities: Array<{
+    id: string;
+    title: string;
+    description: string;
+    severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
+    category: string;
+    lineNumbers?: number[];
+    codeSnippet?: string;
+    recommendation: string;
+    confidence: number;
+  }> = [];
+  
+  const gasOptimizations: Array<{
+    id: string;
+    title: string;
+    description: string;
+    location: string;
+    recommendation: string;
+    gasSaved: number;
+  }> = [];
   
   // Look for severity indicators in the text
   const criticalMatches = auditText.match(/Critical|CRITICAL/gi) || [];

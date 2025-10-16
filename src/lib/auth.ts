@@ -5,6 +5,7 @@ import { db } from './db'
 import { config } from './config'
 import { logger } from './logger'
 import { SecurityUtils } from './security'
+import { signInWithBase } from './base-account'
 
 // Extend NextAuth types
 declare module 'next-auth' {
@@ -122,6 +123,68 @@ export async function requireAuth(req: Request): Promise<{ userId: string }> {
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(db),
   providers: [
+    CredentialsProvider({
+      id: 'base-account',
+      name: 'Base Account',
+      credentials: {
+        address: { label: 'Wallet Address', type: 'text' }
+      },
+      async authorize(credentials) {
+        if (!credentials?.address) {
+          logger.warn('Base authentication attempt with missing address');
+          return null;
+        }
+
+        try {
+          // Validate the address format (basic validation)
+          if (!credentials.address.match(/^0x[a-fA-F0-9]{40}$/)) {
+            logger.warn('Invalid wallet address format', { address: credentials.address });
+            return null;
+          }
+
+          // Check if user exists with this wallet address
+          let user = await db.user.findFirst({
+            where: { 
+              OR: [
+                { email: credentials.address },
+                { name: credentials.address }
+              ]
+            }
+          });
+
+          // Create user if doesn't exist
+          if (!user) {
+            user = await db.user.create({
+              data: {
+                email: credentials.address,
+                name: `Base User ${credentials.address.slice(0, 6)}...${credentials.address.slice(-4)}`,
+                // No password for wallet-based auth
+              }
+            });
+          }
+
+          // Update last login
+          await db.user.update({
+            where: { id: user.id },
+            data: { lastLoginAt: new Date() }
+          });
+
+          logger.info('Base account authenticated successfully', {
+            userId: user.id,
+            address: credentials.address
+          });
+
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+          };
+        } catch (error) {
+          logger.error('Base authentication error', { error, address: credentials.address });
+          return null;
+        }
+      }
+    }),
     CredentialsProvider({
       name: 'credentials',
       credentials: {

@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Check, Star, Zap, Shield, Crown } from 'lucide-react'
 import { useSession } from 'next-auth/react'
 import { toast } from 'sonner'
+import { BasePayButton } from '@/components/base-pay-button'
 
 const plans = [
   {
@@ -227,7 +228,7 @@ export default function PricingPage() {
                   ))}
                 </CardContent>
 
-                <CardFooter>
+                <CardFooter className="flex flex-col gap-3">
                   <Button
                     variant={plan.buttonVariant}
                     className="w-full"
@@ -235,6 +236,33 @@ export default function PricingPage() {
                   >
                     {plan.buttonText}
                   </Button>
+                  
+                  {plan.name !== 'Free' && plan.name !== 'Enterprise' && (
+                    <>
+                      <div className="relative">
+                        <div className="absolute inset-0 flex items-center">
+                          <span className="w-full border-t" />
+                        </div>
+                        <div className="relative flex justify-center text-xs uppercase">
+                          <span className="bg-background px-2 text-muted-foreground">
+                            Or pay with crypto
+                          </span>
+                        </div>
+                      </div>
+                      
+                      <BasePayButton
+                        amount={plan.price.replace('$', '')}
+                        planName={plan.name}
+                        className="w-full"
+                        onSuccess={(paymentId) => {
+                          toast.success(`Payment successful! Plan activated.`)
+                        }}
+                        onError={(error) => {
+                          toast.error(`Payment failed: ${error}`)
+                        }}
+                      />
+                    </>
+                  )}
                 </CardFooter>
               </Card>
             )

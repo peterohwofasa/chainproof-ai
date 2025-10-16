@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Shield, Mail, Lock, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
+import { BaseSignInButton } from '@/components/auth/base-signin-button'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -121,6 +122,31 @@ export default function LoginPage() {
               {isLoading ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
+
+          <div className="mt-6">
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">
+                  Or continue with
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <BaseSignInButton 
+                className="w-full"
+                onSuccess={() => {
+                  toast.success('Successfully connected with Base!')
+                }}
+                onError={(error) => {
+                  toast.error(`Base connection failed: ${error}`)
+                }}
+              />
+            </div>
+          </div>
 
           <div className="mt-6 text-center text-sm">
             <span className="text-gray-600 dark:text-gray-400">

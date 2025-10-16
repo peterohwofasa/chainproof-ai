@@ -5,7 +5,8 @@ import { db } from '../../../../lib/db'
 import { runOpenAIAudit, formatOpenAIAuditForChainProof, OpenAIAuditInput } from '../../../../lib/openai-agent'
 import { emitAuditProgress, emitAuditCompleted, emitAuditError } from '../../../../lib/socket'
 import { auditRequestSchema, validateContractCode } from '../../../../lib/validations'
-import { withAuth, withRateLimit, sanitizeRequestBody, withSecurityHeaders } from '../../../../lib/middleware'
+import { withAuth, withRateLimit, sanitizeRequestBody } from '../../../../lib/middleware'
+import { addSecurityHeaders } from '../../../../lib/security'
 import { withErrorHandler, ValidationError, AuthenticationError, RateLimitError, ExternalServiceError } from '../../../../lib/error-handler'
 import { createBlockchainExplorer, detectNetwork, SUPPORTED_NETWORKS } from '../../../../lib/blockchain-explorer'
 
@@ -201,7 +202,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     auditType: 'OPENAI_AGENT'
   })
   
-  return withSecurityHeaders(response)
+  return addSecurityHeaders(response)
 })
 
 async function analyzeContractWithOpenAI(
