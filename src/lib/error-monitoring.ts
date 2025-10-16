@@ -453,6 +453,7 @@ class ErrorMonitoringService {
 }
 
 export const errorMonitoring = new ErrorMonitoringService();
+export const ErrorMonitor = ErrorMonitoringService;
 
 // Cleanup job - run every hour
 if (typeof setInterval !== 'undefined') {

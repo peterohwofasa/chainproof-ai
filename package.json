@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "prebuild": "powershell -Command \"New-Item -ItemType Directory -Path '.next\\server\\app\\browser' -Force; Copy-Item -Path 'public\\default-stylesheet.css' -Destination '.next\\server\\app\\browser\\default-stylesheet.css' -Force\"",
+    "build": "cross-env NEXT_PHASE=phase-production-build next build",
     "start": "next start",
     "dev:custom": "nodemon --exec \"npx tsx server.ts\" --watch server.ts --watch src --ext ts,tsx,js,jsx",
     "start:custom": "set NODE_ENV=production && tsx server.ts",
@@ -132,6 +133,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/supertest": "^6.0.3",
+    "cross-env": "^10.1.0",
     "eslint": "^9",
     "eslint-config-next": "15.3.5",
     "jest": "^30.2.0",

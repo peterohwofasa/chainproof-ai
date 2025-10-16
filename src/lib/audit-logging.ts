@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { Redis } from 'ioredis';
 import { db } from './db';
 import { logger } from './logger';
 import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
-
-// Redis client for audit logging
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+import { redisClient } from './redis';
 
 export enum AuditEventType {
   // Authentication events
@@ -176,22 +173,22 @@ export class AuditLogger {
   private static async storeInRedis(entry: AuditLogEntry): Promise<void> {
     try {
       const key = `${this.REDIS_KEY_PREFIX}${entry.id}`
-      await redis.setex(key, this.REDIS_TTL, JSON.stringify(entry))
+      await redisClient.setex(key, this.REDIS_TTL, JSON.stringify(entry))
 
       // Add to severity-based sorted sets for quick queries
       const severityKey = `${this.REDIS_KEY_PREFIX}severity:${entry.severity}`
-      await redis.zadd(severityKey, Date.now(), entry.id)
+      await redisClient.zadd(severityKey, Date.now(), entry.id)
 
       // Add to user-based sorted sets
       if (entry.userId) {
         const userKey = `${this.REDIS_KEY_PREFIX}user:${entry.userId}`
-        await redis.zadd(userKey, Date.now(), entry.id)
+        await redisClient.zadd(userKey, Date.now(), entry.id)
       }
 
       // Add to IP-based sorted sets for tracking
       if (entry.ipAddress) {
         const ipKey = `${this.REDIS_KEY_PREFIX}ip:${entry.ipAddress}`
-        await redis.zadd(ipKey, Date.now(), entry.id)
+        await redisClient.zadd(ipKey, Date.now(), entry.id)
       }
 
     } catch (error) {
@@ -279,11 +276,11 @@ export class AuditLogger {
     const alertKey = `${this.REDIS_KEY_PREFIX}alert:${alertType}:${entry.ipAddress || entry.userId}`
     
     // Check if we've already alerted for this recently
-    const lastAlert = await redis.get(alertKey)
+    const lastAlert = await redisClient.get(alertKey)
     if (lastAlert) return
 
     // Set alert cooldown
-    await redis.setex(alertKey, this.ALERT_COOLDOWN, Date.now().toString())
+    await redisClient.setex(alertKey, this.ALERT_COOLDOWN, Date.now().toString())
 
     // Log the alert
     logger.warn(`Security alert triggered: ${alertType}`, {

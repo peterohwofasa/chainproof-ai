@@ -6,10 +6,27 @@ class RedisClient {
   private isConnected = false
 
   constructor() {
-    this.initialize()
+    // Only initialize if not in build mode
+    if (!this.isBuildTime()) {
+      this.initialize()
+    }
+  }
+
+  private isBuildTime(): boolean {
+    return (
+      process.env.NEXT_PHASE === 'phase-production-build' ||
+      process.env.NEXT_PHASE === 'phase-export' ||
+      process.env.NODE_ENV === 'test' ||
+      !process.env.REDIS_URL
+    )
   }
 
   private async initialize() {
+    if (this.isBuildTime()) {
+      logger.warn('Redis initialization skipped - build time detected')
+      return
+    }
+
     if (!process.env.REDIS_URL) {
       logger.warn('Redis URL not configured, caching will be disabled')
       return
@@ -42,7 +59,10 @@ class RedisClient {
         this.isConnected = false
       })
 
-      await this.client.connect()
+      // Only connect if not in build mode
+      if (process.env.NEXT_PHASE !== 'phase-production-build') {
+        await this.client.connect()
+      }
     } catch (error) {
       logger.error('Failed to initialize Redis client:', error)
       this.client = null
