@@ -14,6 +14,11 @@ export function ClientOnly({ children, fallback = null }: ClientOnlyProps) {
     setHasMounted(true)
   }, [])
 
+  // Prevent any rendering during SSR
+  if (typeof window === 'undefined') {
+    return <>{fallback}</>
+  }
+
   if (!hasMounted) {
     return <>{fallback}</>
   }

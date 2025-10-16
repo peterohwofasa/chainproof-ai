@@ -1,6 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+
+// Force dynamic rendering to prevent static generation issues
+export const dynamic = 'force-dynamic'
 import { signIn } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -11,9 +14,7 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Shield, Mail, Lock, Eye, EyeOff } from 'lucide-react'
 import { toast } from 'sonner'
-import { BaseSignInButton } from '@/components/auth/base-signin-button'
-import { CDPSignInButton } from '@/components/auth/cdp-signin-button'
-import { ClientOnly } from '@/components/client-only'
+import { DynamicBaseSignInButton, DynamicCDPSignInButton } from '@/components/dynamic-cdp-components'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -138,27 +139,25 @@ export default function LoginPage() {
             </div>
 
             <div className="mt-6 space-y-3">
-              <ClientOnly>
-                <BaseSignInButton 
-                  className="w-full"
-                  onSuccess={() => {
-                    toast.success('Successfully connected with Base!')
-                  }}
-                  onError={(error) => {
-                    toast.error(`Base connection failed: ${error}`)
-                  }}
-                />
-                
-                <CDPSignInButton 
-                  className="w-full"
-                  onSuccess={() => {
-                    toast.success('Successfully connected with CDP!')
-                  }}
-                  onError={(error) => {
-                    toast.error(`CDP connection failed: ${error}`)
-                  }}
-                />
-              </ClientOnly>
+              <DynamicBaseSignInButton 
+                className="w-full"
+                onSuccess={() => {
+                  toast.success('Successfully connected with Base!')
+                }}
+                onError={(error) => {
+                  toast.error(`Base connection failed: ${error}`)
+                }}
+              />
+              
+              <DynamicCDPSignInButton 
+                className="w-full"
+                onSuccess={() => {
+                  toast.success('Successfully connected with CDP!')
+                }}
+                onError={(error) => {
+                  toast.error(`CDP connection failed: ${error}`)
+                }}
+              />
             </div>
           </div>
 

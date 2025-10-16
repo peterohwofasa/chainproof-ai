@@ -1,15 +1,16 @@
 'use client'
 
 import { useState } from 'react'
+
+// Force dynamic rendering to prevent static generation issues
+export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Check, Star, Zap, Shield, Crown } from 'lucide-react'
 import { useSession } from 'next-auth/react'
 import { toast } from 'sonner'
-import { BasePayButton } from '@/components/base-pay-button'
-import { CDPPayButton } from '@/components/cdp-pay-button'
-import { ClientOnly } from '@/components/client-only'
+import { DynamicBasePayButton, DynamicCDPPayButton } from '@/components/dynamic-cdp-components'
 
 const plans = [
   {
@@ -253,31 +254,29 @@ export default function PricingPage() {
                       </div>
                       
                       <div className="space-y-2">
-                        <ClientOnly>
-                          <BasePayButton
-                            amount={adjustedPrice.replace('$', '')}
-                            planName={plan.name}
-                            className="w-full"
-                            onSuccess={(paymentId) => {
-                              toast.success(`Payment successful! Plan activated.`)
-                            }}
-                            onError={(error) => {
-                              toast.error(`Payment failed: ${error}`)
-                            }}
-                          />
-                          
-                          <CDPPayButton
-                            amount={adjustedPrice.replace('$', '')}
-                            planName={plan.name}
-                            className="w-full"
-                            onSuccess={(transactionHash) => {
-                              toast.success(`Payment successful! Plan activated.`)
-                            }}
-                            onError={(error) => {
-                              toast.error(`Payment failed: ${error}`)
-                            }}
-                          />
-                        </ClientOnly>
+                        <DynamicBasePayButton
+                          amount={adjustedPrice.replace('$', '')}
+                          planName={plan.name}
+                          className="w-full"
+                          onSuccess={(paymentId) => {
+                            toast.success(`Payment successful! Plan activated.`)
+                          }}
+                          onError={(error) => {
+                            toast.error(`Payment failed: ${error}`)
+                          }}
+                        />
+                        
+                        <DynamicCDPPayButton
+                          amount={adjustedPrice.replace('$', '')}
+                          planName={plan.name}
+                          className="w-full"
+                          onSuccess={(transactionHash) => {
+                            toast.success(`Payment successful! Plan activated.`)
+                          }}
+                          onError={(error) => {
+                            toast.error(`Payment failed: ${error}`)
+                          }}
+                        />
                       </div>
                     </>
                   )}
