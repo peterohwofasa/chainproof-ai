@@ -18,13 +18,13 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: z.string().default('7d'),
   
   // Session
-  SESSION_MAX_AGE: z.string().transform(Number).default(604800), // 7 days in seconds
-  SESSION_UPDATE_AGE: z.string().transform(Number).default(86400), // 1 day in seconds
+  SESSION_MAX_AGE: z.string().transform(Number).default('604800'), // 7 days in seconds
+  SESSION_UPDATE_AGE: z.string().transform(Number).default('86400'), // 1 day in seconds
   
   // Security
-  BCRYPT_ROUNDS: z.string().transform(Number).default(12),
-  RATE_LIMIT_WINDOW_MS: z.string().transform(Number).default(900000),
-  RATE_LIMIT_MAX_REQUESTS: z.string().transform(Number).default(100),
+  BCRYPT_ROUNDS: z.string().transform(Number).default('12'),
+  RATE_LIMIT_WINDOW_MS: z.string().transform(Number).default('900000'),
+  RATE_LIMIT_MAX_REQUESTS: z.string().transform(Number).default('100'),
   
   // CORS
   ALLOWED_ORIGINS: z.string().default('*').transform(val => val === '*' ? ['*'] : val.split(',').map(origin => origin.trim())),
@@ -47,19 +47,19 @@ const envSchema = z.object({
   
   // Application
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  PORT: z.string().transform(Number).default(3000),
+  PORT: z.string().transform(Number).default('3000'),
   HOST: z.string().default('0.0.0.0'),
   
   // File Upload
-  MAX_FILE_SIZE: z.string().transform(Number).default(10485760),
+  MAX_FILE_SIZE: z.string().transform(Number).default('10485760'),
   UPLOAD_DIR: z.string().default('./uploads'),
   
   // Cache
-  CACHE_TTL: z.string().transform(Number).default(3600),
+  CACHE_TTL: z.string().transform(Number).default('3600'),
   
   // Backup
   BACKUP_SCHEDULE: z.string().default('0 2 * * *'),
-  BACKUP_RETENTION_DAYS: z.string().transform(Number).default(30),
+  BACKUP_RETENTION_DAYS: z.string().transform(Number).default('30'),
   BACKUP_DIR: z.string().default('./backups'),
   
   // SSL
@@ -92,11 +92,11 @@ function validateEnv() {
         RATE_LIMIT_WINDOW_MS: '900000',
         RATE_LIMIT_MAX_REQUESTS: '100',
         ALLOWED_ORIGINS: '*',
-        SMTP_HOST: undefined,
-        SMTP_PORT: undefined,
-        SMTP_USER: undefined,
-        SMTP_PASS: undefined,
-        FROM_EMAIL: undefined,
+        SMTP_HOST: process.env.SMTP_HOST,
+        SMTP_PORT: process.env.SMTP_PORT,
+        SMTP_USER: process.env.SMTP_USER,
+        SMTP_PASS: process.env.SMTP_PASS,
+        FROM_EMAIL: process.env.FROM_EMAIL,
         FROM_NAME: 'ChainProof Audit',
         ZAI_API_KEY: undefined,
         ZAI_BASE_URL: 'https://api.z-ai.dev',

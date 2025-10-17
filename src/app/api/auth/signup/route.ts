@@ -63,6 +63,7 @@ async function handler(request: NextRequest) {
         email: email,
         password: hashedPassword,
         emailVerificationToken: verificationToken,
+        emailVerified: process.env.NODE_ENV === 'development', // Auto-verify in development
       },
       select: {
         id: true,
@@ -93,8 +94,8 @@ async function handler(request: NextRequest) {
     return NextResponse.json({
       message: 'User created successfully',
       user,
-      verificationRequired: true,
-      verificationToken: verificationToken // In production, send via email
+      verificationRequired: process.env.NODE_ENV !== 'development',
+      verificationToken: process.env.NODE_ENV !== 'development' ? verificationToken : undefined // Only send token in production
     })
   } catch (error) {
     console.error('Signup error:', error)

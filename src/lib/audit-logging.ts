@@ -172,6 +172,12 @@ export class AuditLogger {
    */
   private static async storeInRedis(entry: AuditLogEntry): Promise<void> {
     try {
+      // Only attempt Redis operations if Redis is available
+      if (!redisClient.isReady()) {
+        logger.debug('Redis not available, skipping audit entry storage in Redis', { entryId: entry.id })
+        return
+      }
+
       const key = `${this.REDIS_KEY_PREFIX}${entry.id}`
       await redisClient.setex(key, this.REDIS_TTL, JSON.stringify(entry))
 
@@ -299,6 +305,8 @@ export class AuditLogger {
   static async queryLogs(options: AuditQueryOptions = {}): Promise<{
     logs: AuditLogEntry[]
     total: number
+    page: number
+    totalPages: number
   }> {
     const {
       eventTypes,
@@ -347,11 +355,19 @@ export class AuditLogger {
       db.auditLog.count({ where: whereClause })
     ])
 
-    // Parse JSON fields
+    // Parse JSON fields and cast enum types
     const parsedLogs = logs.map(log => ({
       ...log,
-      details: log.details ? JSON.parse(log.details) : null,
-      metadata: log.metadata ? JSON.parse(log.metadata) : null
+      eventType: log.eventType as AuditEventType,
+      severity: log.severity as AuditSeverity,
+      userId: log.userId || undefined,
+      sessionId: log.sessionId || undefined,
+      ipAddress: log.ipAddress || undefined,
+      userAgent: log.userAgent || undefined,
+      resource: log.resource || undefined,
+      action: log.action || undefined,
+      details: log.details ? JSON.parse(log.details) : undefined,
+      metadata: log.metadata ? JSON.parse(log.metadata) : undefined
     }));
 
     return {

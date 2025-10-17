@@ -30,18 +30,29 @@ export function CDPWalletProvider({ children }: CDPWalletProviderProps) {
 
   useEffect(() => {
     // Check if CDP is properly configured
-    const isConfigured = validateCDPConfig()
-    
-    if (isConfigured) {
-      setContextValue({
-        isAvailable: true,
-        isConfigured: true
-      })
-    } else {
+    try {
+      const isConfigured = validateCDPConfig()
+      
+      if (isConfigured) {
+        console.log('CDP configuration validated successfully')
+        setContextValue({
+          isAvailable: true,
+          isConfigured: true
+        })
+      } else {
+        console.warn('CDP configuration validation failed')
+        setContextValue({
+          isAvailable: false,
+          isConfigured: false,
+          error: 'CDP Project ID not configured or invalid format'
+        })
+      }
+    } catch (error) {
+      console.error('CDP configuration validation error:', error)
       setContextValue({
         isAvailable: false,
         isConfigured: false,
-        error: 'CDP Project ID not configured'
+        error: error instanceof Error ? error.message : 'CDP configuration error'
       })
     }
   }, [])

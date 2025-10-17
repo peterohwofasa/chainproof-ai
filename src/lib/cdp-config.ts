@@ -3,12 +3,14 @@ import { type Config } from '@coinbase/cdp-react';
 // CDP Embedded Wallet Configuration
 export const cdpConfig: Config = {
   projectId: process.env.NEXT_PUBLIC_CDP_PROJECT_ID || '',
-  appName: process.env.NEXT_PUBLIC_CDP_APP_NAME || 'ChainProof AI',
-  appLogoUrl: process.env.NEXT_PUBLIC_CDP_APP_LOGO_URL || '/chainproof-logo.png',
-  // Supported networks - Base and Ethereum
-  supportedNetworks: ['base', 'ethereum'],
-  // Account type - EVM EOA (Regular Accounts)
-  accountType: 'evm-eoa',
+  appName: process.env.NEXT_PUBLIC_CDP_APP_NAME,
+  appLogoUrl: process.env.NEXT_PUBLIC_CDP_APP_LOGO_URL,
+  ethereum: {
+    createOnLogin: "eoa" // Create EOA (Externally Owned Account) on login
+  },
+  solana: {
+    createOnLogin: true // Create Solana account on login
+  }
 };
 
 // CDP Theme Configuration
@@ -71,6 +73,13 @@ export const cdpWalletConfig = {
 export function validateCDPConfig(): boolean {
   if (!cdpConfig.projectId) {
     console.warn('CDP Project ID is not configured. Please set NEXT_PUBLIC_CDP_PROJECT_ID environment variable.');
+    return false;
+  }
+  
+  // Validate project ID format (should be a UUID)
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(cdpConfig.projectId)) {
+    console.warn('CDP Project ID format is invalid. Expected UUID format.');
     return false;
   }
   

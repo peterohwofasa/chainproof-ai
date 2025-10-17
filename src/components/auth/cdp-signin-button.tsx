@@ -105,7 +105,22 @@ export function CDPSignInButton({
 
     } catch (error) {
       console.error('CDP OTP verification error:', error)
-      const errorMessage = error instanceof Error ? error.message : 'OTP verification failed'
+      let errorMessage = 'OTP verification failed'
+      
+      if (error instanceof Error) {
+        errorMessage = error.message
+        
+        // Provide more specific error messages for common issues
+        if (error.message.includes('Wallet authentication error')) {
+          errorMessage = 'CDP wallet authentication failed. Please check your project configuration.'
+        } else if (error.message.includes('Failed to create EVM account')) {
+          errorMessage = 'Failed to create wallet account. Please try again or contact support.'
+        } else if (error.message.includes('Invalid OTP')) {
+          errorMessage = 'Invalid verification code. Please check your email and try again.'
+        } else if (error.message.includes('OTP expired')) {
+          errorMessage = 'Verification code has expired. Please request a new one.'
+        }
+      }
       
       toast({
         title: "Verification Failed",
@@ -124,7 +139,7 @@ export function CDPSignInButton({
       setIsSigningIn(true)
 
       // Sign in with NextAuth using CDP wallet address
-      const result = await signIn('credentials', {
+      const result = await signIn('cdp-wallet', {
         walletAddress,
         walletType: 'cdp',
         redirect: false

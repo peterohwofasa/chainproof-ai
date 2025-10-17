@@ -20,9 +20,10 @@ export async function GET(request: NextRequest) {
             plan: true,
             status: true,
             creditsRemaining: true,
-            creditsTotal: true,
-            expiresAt: true,
-            createdAt: true
+            createdAt: true,
+            isFreeTrial: true,
+            freeTrialStarted: true,
+            freeTrialEnds: true
           },
           where: { status: 'ACTIVE' },
           orderBy: { createdAt: 'desc' },

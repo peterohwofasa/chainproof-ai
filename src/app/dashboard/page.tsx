@@ -82,6 +82,33 @@ export default function DashboardPage() {
   const [stats, setStats] = useState(mockStats)
   const [selectedAudit, setSelectedAudit] = useState<any>(null)
 
+  const handleExportReport = (audit: any) => {
+    // Generate and download audit report
+    const reportData = {
+      contractName: audit.contractName,
+      overallScore: audit.overallScore,
+      riskLevel: audit.riskLevel,
+      vulnerabilities: audit.vulnerabilities,
+      createdAt: audit.createdAt,
+      reportGenerated: new Date()
+    }
+    
+    const dataStr = JSON.stringify(reportData, null, 2)
+    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr)
+    
+    const exportFileDefaultName = `${audit.contractName}_audit_report.json`
+    
+    const linkElement = document.createElement('a')
+    linkElement.setAttribute('href', dataUri)
+    linkElement.setAttribute('download', exportFileDefaultName)
+    linkElement.click()
+  }
+
+  const handleViewAudit = (audit: any) => {
+    // Navigate to detailed audit view
+    router.push(`/audit/report/${audit.id}`)
+  }
+
   // Show loading state while checking authentication
   if (status === 'loading') {
     return (
@@ -281,11 +308,19 @@ export default function DashboardPage() {
                         </Badge>
                       </div>
                       <div className="flex gap-2">
-                        <Button variant="outline" size="sm">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleViewAudit(audit)}
+                        >
                           <Eye className="w-4 h-4 mr-1" />
                           View
                         </Button>
-                        <Button variant="outline" size="sm">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleExportReport(audit)}
+                        >
                           <Download className="w-4 h-4 mr-1" />
                           Export
                         </Button>

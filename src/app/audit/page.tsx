@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
+import { useAuth, AuthProvider } from '@/contexts/auth-context'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/textarea'
@@ -17,8 +18,9 @@ import { Upload, FileText, Link2, AlertCircle, CheckCircle2, Shield, Code, Zap, 
 import { toast } from 'sonner'
 import { useAuditProgress } from '@/hooks/use-audit-progress'
 
-export default function AuditPage() {
+function AuditPageContent() {
   const { data: session, status } = useSession()
+  const { user, refreshUser } = useAuth()
   const router = useRouter()
   const [contractCode, setContractCode] = useState('')
   const [contractAddress, setContractAddress] = useState('')
@@ -27,7 +29,6 @@ export default function AuditPage() {
   const [isAuditing, setIsAuditing] = useState(false)
   const [auditId, setAuditId] = useState<string | null>(null)
   const [auditResult, setAuditResult] = useState<any>(null)
-  const [creditsRemaining, setCreditsRemaining] = useState<number>(0)
 
   const { progress, isConnected, error, joinAudit, leaveAudit } = useAuditProgress()
 
@@ -85,12 +86,31 @@ contract VulnerableToken is ERC20, Ownable {
     if (progress && progress.status === 'COMPLETED') {
       setIsAuditing(false)
       toast.success('Audit completed successfully!')
+      
+      // Fetch the full audit report
+      if (auditId) {
+        fetchFullAuditReport(auditId)
+      }
     }
     if (progress && progress.status === 'ERROR') {
       setIsAuditing(false)
       toast.error(progress.message || 'Audit failed')
     }
-  }, [progress])
+  }, [progress, auditId])
+
+  const fetchFullAuditReport = async (auditId: string) => {
+    try {
+      const response = await fetch(`/api/audits/${auditId}/report`)
+      if (response.ok) {
+        const reportData = await response.json()
+        setAuditResult(reportData.audit)
+      } else {
+        console.error('Failed to fetch audit report')
+      }
+    } catch (error) {
+      console.error('Error fetching audit report:', error)
+    }
+  }
 
   const handleStartAudit = async () => {
     if (!contractCode.trim() && !contractAddress.trim()) {
@@ -98,8 +118,20 @@ contract VulnerableToken is ERC20, Ownable {
       return
     }
 
-    if (creditsRemaining <= 0) {
-      toast.error('Insufficient credits. Please upgrade your plan.')
+    // Check if user has credits or is on a valid free trial
+    const creditsRemaining = user?.subscription?.creditsRemaining || 0
+    const isFreeTrial = user?.subscription?.isFreeTrial || false
+    const freeTrialEnds = user?.subscription?.freeTrialEnds
+    
+    // Check if free trial is still valid
+    const isValidFreeTrial = isFreeTrial && freeTrialEnds && new Date(freeTrialEnds) > new Date()
+    
+    // DEVELOPMENT/TESTING BYPASS: Allow audits for testing purposes
+    const isDevelopment = process.env.NODE_ENV === 'development'
+    const allowTesting = true // Temporarily disabled for testing - isDevelopment || process.env.NEXT_PUBLIC_BYPASS_CREDIT_CHECK === 'true'
+    
+    if (!allowTesting && creditsRemaining <= 0 && !isValidFreeTrial) {
+      toast.error('Insufficient credits. Please upgrade your plan or start your free trial.')
       return
     }
 
@@ -124,7 +156,8 @@ contract VulnerableToken is ERC20, Ownable {
         const result = await response.json()
         setAuditId(result.auditId)
         setAuditResult(result)
-        setCreditsRemaining(result.creditsRemaining)
+        // Refresh user data to get updated credits
+        await refreshUser()
         toast.success('Audit started successfully!')
       } else {
         const error = await response.json()
@@ -203,7 +236,10 @@ contract VulnerableToken is ERC20, Ownable {
             )}
             <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
               <Coins className="w-3 h-3 mr-1" />
-              {creditsRemaining} credits remaining
+              {user?.subscription?.creditsRemaining || 0} credits remaining
+              {user?.subscription?.isFreeTrial && (
+                <span className="ml-1 text-xs">(Free Trial)</span>
+              )}
             </Badge>
           </div>
         </div>
@@ -342,18 +378,45 @@ contract VulnerableToken is ERC20, Ownable {
                 </Alert>
               )}
 
-              {creditsRemaining <= 0 && (
-                <Alert variant="destructive">
-                  <Coins className="h-4 w-4" />
-                  <AlertDescription>
-                    You have no credits remaining. Please upgrade your plan to continue auditing.
-                  </AlertDescription>
-                </Alert>
-              )}
+              {(() => {
+                const creditsRemaining = user?.subscription?.creditsRemaining || 0
+                const isFreeTrial = user?.subscription?.isFreeTrial || false
+                const freeTrialEnds = user?.subscription?.freeTrialEnds
+                const isValidFreeTrial = isFreeTrial && freeTrialEnds && new Date(freeTrialEnds) > new Date()
+                
+                // DEVELOPMENT/TESTING BYPASS: Don't show credit warning during testing
+                const isDevelopment = process.env.NODE_ENV === 'development'
+                const allowTesting = true // Temporarily disabled for testing - isDevelopment || process.env.NEXT_PUBLIC_BYPASS_CREDIT_CHECK === 'true'
+                
+                if (!allowTesting && creditsRemaining <= 0 && !isValidFreeTrial) {
+                  return (
+                    <Alert variant="destructive">
+                      <Coins className="h-4 w-4" />
+                      <AlertDescription>
+                        You have no credits remaining. Please upgrade your plan or start your free trial to continue auditing.
+                      </AlertDescription>
+                    </Alert>
+                  )
+                }
+                return null
+              })()}
 
               <Button 
                 onClick={handleStartAudit}
-                disabled={isAuditing || (!contractCode.trim() && !contractAddress.trim()) || creditsRemaining <= 0}
+                disabled={(() => {
+                  const creditsRemaining = user?.subscription?.creditsRemaining || 0
+                  const isFreeTrial = user?.subscription?.isFreeTrial || false
+                  const freeTrialEnds = user?.subscription?.freeTrialEnds
+                  const isValidFreeTrial = isFreeTrial && freeTrialEnds && new Date(freeTrialEnds) > new Date()
+                  
+                  // DEVELOPMENT/TESTING BYPASS: Don't disable button during testing
+                  const isDevelopment = process.env.NODE_ENV === 'development'
+                  const allowTesting = true // Temporarily disabled for testing - isDevelopment || process.env.NEXT_PUBLIC_BYPASS_CREDIT_CHECK === 'true'
+                  
+                  const hasInsufficientCredits = !allowTesting && creditsRemaining <= 0 && !isValidFreeTrial
+                  
+                  return isAuditing || (!contractCode.trim() && !contractAddress.trim()) || hasInsufficientCredits
+                })()}
                 className="w-full"
                 size="lg"
               >
@@ -374,6 +437,14 @@ contract VulnerableToken is ERC20, Ownable {
         )}
       </div>
     </div>
+  )
+}
+
+export default function AuditPage() {
+  return (
+    <AuthProvider>
+      <AuditPageContent />
+    </AuthProvider>
   )
 }
 

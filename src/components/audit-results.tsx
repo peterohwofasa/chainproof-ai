@@ -61,6 +61,14 @@ interface AuditData {
     summary: string
     recommendations: string[]
   }
+  auditReport?: {
+    id: string
+    reportType: string
+    content: any
+    ipfsHash?: string | null
+    blockchainTxHash?: string | null
+    createdAt: Date
+  }
 }
 
 interface AuditResultsProps {
@@ -255,7 +263,7 @@ export function AuditResults({ audit }: AuditResultsProps) {
 
       {/* Main Content Tabs */}
       <Tabs defaultValue="vulnerabilities" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="vulnerabilities" className="flex items-center gap-2">
             <AlertTriangle className="h-4 w-4" />
             Vulnerabilities ({audit.vulnerabilities.length})
@@ -267,6 +275,10 @@ export function AuditResults({ audit }: AuditResultsProps) {
           <TabsTrigger value="analysis" className="flex items-center gap-2">
             <Brain className="h-4 w-4" />
             AI Analysis
+          </TabsTrigger>
+          <TabsTrigger value="report" className="flex items-center gap-2">
+            <Shield className="h-4 w-4" />
+            Full Report
           </TabsTrigger>
         </TabsList>
 
@@ -442,6 +454,98 @@ export function AuditResults({ audit }: AuditResultsProps) {
                 </h3>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
                   AI analysis was not performed for this audit.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="report" className="space-y-4">
+          {audit.auditReport ? (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Shield className="h-5 w-5 text-blue-500" />
+                  Complete Audit Report
+                </CardTitle>
+                <CardDescription>
+                  Generated on {new Date(audit.auditReport.createdAt).toLocaleDateString()}
+                  {audit.auditReport.ipfsHash && (
+                    <span className="ml-2">
+                      • IPFS: <code className="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">{audit.auditReport.ipfsHash}</code>
+                    </span>
+                  )}
+                  {audit.auditReport.blockchainTxHash && (
+                    <span className="ml-2">
+                      • Blockchain: <code className="text-xs bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">{audit.auditReport.blockchainTxHash}</code>
+                    </span>
+                  )}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="font-medium mb-2">Report Type</h4>
+                    <Badge variant="outline">{audit.auditReport.reportType}</Badge>
+                  </div>
+                  <div>
+                    <h4 className="font-medium mb-2">Report Content</h4>
+                    <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg">
+                      <pre className="text-sm whitespace-pre-wrap overflow-auto max-h-96">
+                        {typeof audit.auditReport.content === 'string' 
+                          ? audit.auditReport.content 
+                          : JSON.stringify(audit.auditReport.content, null, 2)
+                        }
+                      </pre>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button 
+                      onClick={() => {
+                        const blob = new Blob([
+                          typeof audit.auditReport!.content === 'string' 
+                            ? audit.auditReport!.content 
+                            : JSON.stringify(audit.auditReport!.content, null, 2)
+                        ], { type: 'text/plain' })
+                        const url = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = url
+                        a.download = `${audit.contractName}-full-report.txt`
+                        document.body.appendChild(a)
+                        a.click()
+                        document.body.removeChild(a)
+                        URL.revokeObjectURL(url)
+                      }}
+                      variant="outline"
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Download Full Report
+                    </Button>
+                    <Button 
+                      onClick={() => {
+                        const content = typeof audit.auditReport!.content === 'string' 
+                          ? audit.auditReport!.content 
+                          : JSON.stringify(audit.auditReport!.content, null, 2)
+                        navigator.clipboard.writeText(content)
+                      }}
+                      variant="outline"
+                    >
+                      <Copy className="h-4 w-4 mr-2" />
+                      Copy to Clipboard
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <Shield className="w-12 h-12 text-gray-400 mb-4" />
+                <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  Full Report Not Available
+                </h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  The complete audit report is not available for this audit.
                 </p>
               </CardContent>
             </Card>

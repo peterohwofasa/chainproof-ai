@@ -233,6 +233,12 @@ export const authOptions: NextAuthOptions = {
             return null;
           }
 
+          // Check if email is verified
+          if (!user.emailVerified) {
+            logger.warn('Authentication attempt with unverified email', { email });
+            throw new Error('EMAIL_NOT_VERIFIED');
+          }
+
           // Check if account is locked
           if (user.lockedUntil && user.lockedUntil > new Date()) {
             logger.warn('Authentication attempt on locked account', { 
@@ -286,6 +292,80 @@ export const authOptions: NextAuthOptions = {
           };
         } catch (error) {
           logger.error('Authentication error', { error, email: credentials.email });
+          return null;
+        }
+      }
+    }),
+    CredentialsProvider({
+      id: 'cdp-wallet',
+      name: 'CDP Wallet',
+      credentials: {
+        walletAddress: { label: 'Wallet Address', type: 'text' },
+        walletType: { label: 'Wallet Type', type: 'text' }
+      },
+      async authorize(credentials) {
+        if (!credentials?.walletAddress || credentials.walletType !== 'cdp') {
+          logger.warn('CDP wallet authentication attempt with missing or invalid credentials', {
+            hasWalletAddress: !!credentials?.walletAddress,
+            walletType: credentials?.walletType
+          });
+          return null;
+        }
+
+        try {
+          // Validate wallet address format (Ethereum address)
+          const walletAddress = credentials.walletAddress.toLowerCase();
+          if (!/^0x[a-fA-F0-9]{40}$/.test(walletAddress)) {
+            logger.warn('CDP wallet authentication with invalid address format', { walletAddress });
+            return null;
+          }
+
+          // Check if user exists with this wallet address
+          let user = await db.user.findFirst({
+            where: {
+              OR: [
+                { walletAddress: walletAddress },
+                { email: walletAddress } // Some users might have wallet address as email
+              ]
+            }
+          });
+
+          // If user doesn't exist, create a new one
+          if (!user) {
+            user = await db.user.create({
+               data: {
+                 email: walletAddress,
+                 walletAddress: walletAddress,
+                 name: `CDP User ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`,
+                 emailVerified: true, // CDP wallets are considered verified
+                 lastLoginAt: new Date(),
+               }
+             });
+
+            logger.info('New CDP wallet user created', { 
+              userId: user.id, 
+              walletAddress: walletAddress 
+            });
+          } else {
+            // Update last login
+             await db.user.update({
+               where: { id: user.id },
+               data: { lastLoginAt: new Date() }
+             });
+
+            logger.info('CDP wallet user signed in', { 
+              userId: user.id, 
+              walletAddress: walletAddress 
+            });
+          }
+
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+          };
+        } catch (error) {
+          logger.error('CDP wallet authentication error', { error, walletAddress: credentials.walletAddress });
           return null;
         }
       }

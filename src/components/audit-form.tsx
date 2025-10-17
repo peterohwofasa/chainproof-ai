@@ -23,6 +23,7 @@ interface AuditFormData {
   contractAddress?: string
   contractName: string
   network?: string
+  auditType?: string
 }
 
 export function AuditForm({ onSubmit, isLoading = false }: AuditFormProps) {
@@ -92,6 +93,7 @@ export function AuditForm({ onSubmit, isLoading = false }: AuditFormProps) {
     const formData: AuditFormData = {
       contractName,
       network,
+      auditType: 'OPENAI_AGENT',
     }
 
     if (inputType === 'code') {

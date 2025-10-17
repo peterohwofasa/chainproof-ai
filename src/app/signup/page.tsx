@@ -19,6 +19,8 @@ export default function SignupPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [verificationToken, setVerificationToken] = useState('')
+  const [showSuccess, setShowSuccess] = useState(false)
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -54,8 +56,15 @@ export default function SignupPage() {
       })
 
       if (response.ok) {
-        toast.success('Account created successfully! Please sign in.')
-        router.push('/login')
+        const data = await response.json()
+        if (data.verificationRequired) {
+          setVerificationToken(data.verificationToken)
+          setShowSuccess(true)
+          toast.success('Account created successfully! Please save your verification token.')
+        } else {
+          toast.success('Account created successfully! You can now sign in.')
+          router.push('/login')
+        }
       } else {
         const data = await response.json()
         setError(data.error || 'Failed to create account')
@@ -84,6 +93,30 @@ export default function SignupPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {showSuccess ? (
+            <div className="space-y-4 text-center">
+              <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                <h3 className="text-lg font-semibold text-green-800 dark:text-green-200 mb-2">
+                  Account Created Successfully!
+                </h3>
+                <p className="text-sm text-green-700 dark:text-green-300 mb-4">
+                  Your verification token is:
+                </p>
+                <div className="p-3 bg-white dark:bg-slate-800 border rounded-lg font-mono text-sm break-all">
+                  {verificationToken}
+                </div>
+                <p className="text-xs text-green-600 dark:text-green-400 mt-2">
+                  Please save this token. You'll need it to verify your email on the login page.
+                </p>
+              </div>
+              <Button 
+                onClick={() => router.push('/login')} 
+                className="w-full"
+              >
+                Go to Login
+              </Button>
+            </div>
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="name">Full Name</Label>
@@ -176,6 +209,7 @@ export default function SignupPage() {
               {isLoading ? 'Creating Account...' : 'Create Account'}
             </Button>
           </form>
+          )}
 
           <div className="mt-6 text-center text-sm">
             <span className="text-gray-600 dark:text-gray-400">

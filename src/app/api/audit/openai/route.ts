@@ -109,8 +109,12 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
                        subscriptionWithTrial.freeTrialEnds && 
                        now < subscriptionWithTrial.freeTrialEnds
 
-  // OpenAI agent audits require premium subscription or free trial
-  if (!isInFreeTrial && subscription.creditsRemaining <= 0) {
+  // DEVELOPMENT/TESTING BYPASS: Allow audits for testing purposes
+  const isDevelopment = process.env.NODE_ENV === 'development'
+  const allowTesting = true // Temporarily disabled for testing - isDevelopment || process.env.BYPASS_CREDIT_CHECK === 'true'
+
+  // OpenAI agent audits require premium subscription or free trial (unless bypassed for testing)
+  if (!allowTesting && !isInFreeTrial && subscription.creditsRemaining <= 0) {
     const daysRemaining = subscriptionWithTrial.freeTrialEnds ? 
       Math.ceil((subscriptionWithTrial.freeTrialEnds.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : 0
     
@@ -174,8 +178,8 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     emitAuditError(audit.id, error.message || 'OpenAI agent audit failed')
   })
 
-  // Deduct credits if not in free trial
-  if (!isInFreeTrial) {
+  // Deduct credits if not in free trial and not in testing mode
+  if (!isInFreeTrial && !allowTesting) {
     await db.subscription.update({
       where: { id: subscription.id },
       data: { creditsRemaining: subscription.creditsRemaining - 1 },

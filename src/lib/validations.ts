@@ -6,7 +6,7 @@ export const auditRequestSchema = z.object({
   contractAddress: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Invalid Ethereum address').optional(),
   contractName: z.string().min(1, 'Contract name is required').max(100, 'Contract name too long'),
   network: z.enum(['ethereum', 'base', 'polygon', 'arbitrum', 'optimism', 'sepolia', 'baseSepolia']).optional(),
-  auditType: z.enum(['STANDARD', 'OPENAI_AGENT']).optional().default('STANDARD'),
+  auditType: z.enum(['STANDARD', 'OPENAI_AGENT']).optional().default('OPENAI_AGENT'),
 }).refine(
   (data) => data.contractCode || data.contractAddress,
   {

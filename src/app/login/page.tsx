@@ -22,6 +22,9 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showVerification, setShowVerification] = useState(false)
+  const [verificationToken, setVerificationToken] = useState('')
+  const [isVerifying, setIsVerifying] = useState(false)
   const router = useRouter()
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -33,20 +36,70 @@ export default function LoginPage() {
       const result = await signIn('credentials', {
         email,
         password,
-        redirect: true,
-        callbackUrl: '/dashboard',
+        redirect: false, // Don't redirect automatically to handle errors
       })
 
       if (result?.error) {
-        setError('Invalid email or password')
-        toast.error('Invalid email or password')
+        if (result.error.includes('EMAIL_NOT_VERIFIED')) {
+          setError('Please verify your email address to continue.')
+          setShowVerification(true)
+          toast.error('Please verify your email address to continue.')
+        } else {
+          setError('Invalid email or password')
+          toast.error('Invalid email or password')
+        }
+      } else if (result?.ok) {
+        toast.success('Successfully signed in!')
+        router.push('/dashboard')
       }
-      // No need to manually redirect since NextAuth will handle it
     } catch (error) {
       setError('An error occurred. Please try again.')
       toast.error('An error occurred. Please try again.')
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleVerification = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsVerifying(true)
+    setError('')
+
+    try {
+      const response = await fetch('/api/auth/verify-email', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          token: verificationToken,
+        }),
+      })
+
+      if (response.ok) {
+        toast.success('Email verified successfully! You can now sign in.')
+        setShowVerification(false)
+        setVerificationToken('')
+        // Try to sign in again automatically
+        const result = await signIn('credentials', {
+          email,
+          password,
+          redirect: false,
+        })
+        
+        if (result?.ok) {
+          router.push('/dashboard')
+        }
+      } else {
+        const data = await response.json()
+        setError(data.error || 'Verification failed')
+        toast.error(data.error || 'Verification failed')
+      }
+    } catch (error) {
+      setError('An error occurred during verification.')
+      toast.error('An error occurred during verification.')
+    } finally {
+      setIsVerifying(false)
     }
   }
 
@@ -65,7 +118,60 @@ export default function LoginPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
+          {showVerification ? (
+            <div className="space-y-4">
+              <div className="text-center">
+                <h3 className="text-lg font-semibold">Verify Your Email</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+                  Please enter the verification token that was provided when you created your account.
+                </p>
+              </div>
+              
+              <form onSubmit={handleVerification} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="verificationToken">Verification Token</Label>
+                  <Input
+                    id="verificationToken"
+                    type="text"
+                    placeholder="Enter your verification token"
+                    value={verificationToken}
+                    onChange={(e) => setVerificationToken(e.target.value)}
+                    required
+                  />
+                </div>
+
+                {error && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
+
+                <div className="space-y-2">
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={isVerifying}
+                  >
+                    {isVerifying ? 'Verifying...' : 'Verify Email'}
+                  </Button>
+                  
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => {
+                      setShowVerification(false)
+                      setError('')
+                      setVerificationToken('')
+                    }}
+                  >
+                    Back to Login
+                  </Button>
+                </div>
+              </form>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <div className="relative">
@@ -111,6 +217,12 @@ export default function LoginPage() {
               </div>
             </div>
 
+            <div className="flex justify-end">
+              <Link href="/forgot-password" className="text-sm text-blue-600 hover:text-blue-500">
+                Forgot password?
+              </Link>
+            </div>
+
             {error && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
@@ -125,6 +237,7 @@ export default function LoginPage() {
               {isLoading ? 'Signing in...' : 'Sign In'}
             </Button>
           </form>
+          )}
 
           <div className="mt-6">
             <div className="relative">

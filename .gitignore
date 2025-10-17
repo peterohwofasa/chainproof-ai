@@ -48,3 +48,9 @@ prompt
 
 server.log
 .vercel
+
+# Windows specific
+nul
+logs/
+prisma/db/
+prisma/prisma/db/
