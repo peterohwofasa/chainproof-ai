@@ -75,9 +75,15 @@ export async function checkBasePaymentStatus(paymentId: string): Promise<BasePay
  */
 export async function signInWithBase(): Promise<{ address: string; isConnected: boolean }> {
   try {
+    // Check if we're in a browser environment
+    if (typeof window === 'undefined') {
+      throw new Error('Base Account SDK requires browser environment');
+    }
+
+    // Request account access using eth_requestAccounts
     const provider = baseAccountSDK.getProvider();
     const accounts = await provider.request({ 
-      method: 'wallet_connect' 
+      method: 'eth_requestAccounts' 
     }) as string[];
     
     if (accounts && accounts.length > 0) {
@@ -87,10 +93,20 @@ export async function signInWithBase(): Promise<{ address: string; isConnected: 
       };
     }
     
-    throw new Error('No accounts found');
+    throw new Error('No accounts found or user denied access');
   } catch (error) {
     console.error('Base sign-in failed:', error);
-    throw new Error('Sign-in failed');
+    
+    // Provide more specific error messages
+    if (error instanceof Error) {
+      if (error.message.includes('User rejected')) {
+        throw new Error('User rejected the connection request');
+      } else if (error.message.includes('No accounts')) {
+        throw new Error('No Base accounts available');
+      }
+    }
+    
+    throw new Error('Failed to connect to Base Account');
   }
 }
 
@@ -99,6 +115,11 @@ export async function signInWithBase(): Promise<{ address: string; isConnected: 
  */
 export async function getBaseAccountStatus(): Promise<{ address?: string; isConnected: boolean }> {
   try {
+    // Check if we're in a browser environment
+    if (typeof window === 'undefined') {
+      return { isConnected: false };
+    }
+
     const provider = baseAccountSDK.getProvider();
     const accounts = await provider.request({ 
       method: 'eth_accounts' 
@@ -119,8 +140,18 @@ export async function getBaseAccountStatus(): Promise<{ address?: string; isConn
  */
 export async function disconnectBaseAccount(): Promise<void> {
   try {
-    const provider = baseAccountSDK.getProvider();
-    await provider.request({ method: 'wallet_disconnect' });
+    // Check if we're in a browser environment
+    if (typeof window === 'undefined') {
+      throw new Error('Base Account SDK requires browser environment');
+    }
+
+    // Base Account SDK doesn't have a direct disconnect method
+    // The disconnection is typically handled by the wallet itself
+    // We can clear any local state or session data here
+    console.log('Base account disconnection requested');
+    
+    // Note: The actual disconnection depends on the Base wallet implementation
+    // Users would need to disconnect from their Base wallet directly
   } catch (error) {
     console.error('Failed to disconnect:', error);
     throw new Error('Disconnect failed');

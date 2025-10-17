@@ -65,7 +65,7 @@ vercel --prod
 if ($LASTEXITCODE -eq 0) {
     Write-Host "✅ Deployment successful!" -ForegroundColor Green
     Write-Host "🎉 Your ChainProof AI application is now live!" -ForegroundColor Cyan
-    Write-Host "" 
+    Write-Host ""
     Write-Host "Next steps:" -ForegroundColor Yellow
     Write-Host "1. Test your deployed application" -ForegroundColor White
     Write-Host "2. Set up your custom domain (optional)" -ForegroundColor White

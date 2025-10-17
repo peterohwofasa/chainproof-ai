@@ -3,6 +3,7 @@
 import React, { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { signIn } from 'next-auth/react'
+import { useRouter } from 'next/navigation'
 import { toast } from '@/hooks/use-toast'
 import { signInWithBase } from '@/lib/base-account'
 import { Loader2, Wallet } from 'lucide-react'
@@ -23,6 +24,7 @@ export function BaseSignInButton({
   callbackUrl = '/dashboard'
 }: BaseSignInButtonProps) {
   const [isConnecting, setIsConnecting] = useState(false)
+  const router = useRouter()
 
   const handleSignIn = async () => {
     setIsConnecting(true)
@@ -54,17 +56,26 @@ export function BaseSignInButton({
 
         onSuccess?.()
 
-        // Redirect if successful
-        if (result.url) {
-          window.location.href = result.url
-        } else {
-          window.location.href = callbackUrl
-        }
+        // Use Next.js router for navigation to prevent chunk loading errors
+        router.push(callbackUrl)
       }
 
     } catch (error) {
       console.error('Base sign-in error:', error)
-      const errorMessage = error instanceof Error ? error.message : 'Failed to connect'
+      let errorMessage = 'Failed to connect to Base Account'
+      
+      if (error instanceof Error) {
+        errorMessage = error.message
+      }
+      
+      // Provide user-friendly error messages
+      if (errorMessage.includes('User rejected')) {
+        errorMessage = 'Connection was cancelled. Please try again and approve the connection.'
+      } else if (errorMessage.includes('No Base accounts')) {
+        errorMessage = 'No Base accounts found. Please make sure you have a Base wallet set up.'
+      } else if (errorMessage.includes('browser environment')) {
+        errorMessage = 'Base Account requires a web browser. Please try again in a browser.'
+      }
       
       toast({
         title: "Connection Failed",

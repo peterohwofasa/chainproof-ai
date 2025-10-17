@@ -8,6 +8,7 @@ import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { Menu, Shield, User, LogOut } from 'lucide-react'
 import Image from 'next/image'
 import { NotificationBell } from '@/components/notifications/notification-center'
+import { BaseSignInNavButton } from '@/components/auth/base-signin-nav-button'
 
 export function Navigation() {
   const [isOpen, setIsOpen] = useState(false)
@@ -96,6 +97,7 @@ export function Navigation() {
                 <Button variant="ghost" size="sm" asChild>
                   <Link href="/login">Sign In</Link>
                 </Button>
+                <BaseSignInNavButton />
                 <Button size="sm" asChild>
                   <Link href="/signup">Get Started</Link>
                 </Button>
@@ -165,6 +167,7 @@ export function Navigation() {
                             Sign In
                           </Link>
                         </Button>
+                        <BaseSignInNavButton className="w-full" />
                         <Button size="sm" className="w-full" asChild>
                           <Link href="/signup" onClick={() => setIsOpen(false)}>
                             Get Started

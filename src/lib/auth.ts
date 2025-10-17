@@ -136,9 +136,12 @@ export const authOptions: NextAuthOptions = {
         }
 
         try {
-          // Validate the address format (basic validation)
-          if (!credentials.address.match(/^0x[a-fA-F0-9]{40}$/)) {
-            logger.warn('Invalid wallet address format', { address: credentials.address });
+          // Normalize the address to lowercase
+          const address = credentials.address.toLowerCase();
+
+          // Validate the address format (Ethereum address format)
+          if (!address.match(/^0x[a-fA-F0-9]{40}$/)) {
+            logger.warn('Invalid wallet address format', { address });
             return null;
           }
 
@@ -146,33 +149,45 @@ export const authOptions: NextAuthOptions = {
           let user = await db.user.findFirst({
             where: { 
               OR: [
-                { email: credentials.address },
-                { name: credentials.address }
+                { email: address },
+                { walletAddress: address }
               ]
             }
           });
 
           // Create user if doesn't exist
           if (!user) {
+            const displayName = `Base User ${address.slice(0, 6)}...${address.slice(-4)}`;
+            
             user = await db.user.create({
               data: {
-                email: credentials.address,
-                name: `Base User ${credentials.address.slice(0, 6)}...${credentials.address.slice(-4)}`,
+                email: address, // Use wallet address as email for Base users
+                walletAddress: address,
+                name: displayName,
+                emailVerified: true, // Base wallet connections are considered verified
                 // No password for wallet-based auth
               }
             });
+
+            logger.info('New Base user created', {
+              userId: user.id,
+              address
+            });
+          } else {
+            // Update last login and ensure wallet address is set
+            await db.user.update({
+              where: { id: user.id },
+              data: { 
+                lastLoginAt: new Date(),
+                walletAddress: address // Ensure wallet address is stored
+              }
+            });
+
+            logger.info('Existing Base user authenticated', {
+              userId: user.id,
+              address
+            });
           }
-
-          // Update last login
-          await db.user.update({
-            where: { id: user.id },
-            data: { lastLoginAt: new Date() }
-          });
-
-          logger.info('Base account authenticated successfully', {
-            userId: user.id,
-            address: credentials.address
-          });
 
           return {
             id: user.id,

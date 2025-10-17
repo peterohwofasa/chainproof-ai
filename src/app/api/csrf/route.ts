@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { csrfProtection } from '@/lib/csrf-protection'
 import { logger } from '@/lib/logger'
-import { ErrorHandler } from '@/lib/error-handler'
+import { handleApiError } from '@/lib/error-handler'
 
 /**
  * GET /api/csrf - Generate CSRF token for authenticated user
@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
     return response
   } catch (error) {
     logger.error('Failed to generate CSRF token', { error })
-    return ErrorHandler.handleError(error, request)
+    return handleApiError(error, request)
   }
 }
 
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     logger.error('CSRF token validation error', { error })
-    return ErrorHandler.handleError(error, request)
+    return handleApiError(error, request)
   }
 }
 
@@ -116,6 +116,6 @@ export async function DELETE(request: NextRequest) {
     return response
   } catch (error) {
     logger.error('Failed to invalidate CSRF token', { error })
-    return ErrorHandler.handleError(error, request)
+    return handleApiError(error, request)
   }
 }
