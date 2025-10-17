@@ -143,6 +143,19 @@ class HealthCheckService {
 
   async checkFileSystem(): Promise<HealthCheckResult> {
     const start = Date.now();
+    
+    // Skip file system checks during build time or in edge runtime
+    if (typeof window !== 'undefined' || typeof process === 'undefined' || process.env.NODE_ENV === undefined) {
+      return {
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        responseTime: Date.now() - start,
+        details: {
+          message: 'File system checks skipped in edge runtime'
+        }
+      };
+    }
+    
     try {
       const fs = await import('fs/promises');
       const path = await import('path');

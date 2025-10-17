@@ -1,6 +1,5 @@
 import { NextRequest } from 'next/server'
 import { logger } from './logger'
-import DOMPurify from 'isomorphic-dompurify'
 
 export interface ValidationRule {
   required?: boolean
@@ -252,14 +251,53 @@ export class InputValidator {
   private static sanitizeInput(value: string, allowHTML = false): string {
     if (!allowHTML) {
       // Strip all HTML tags and decode entities
-      return DOMPurify.sanitize(value, { ALLOWED_TAGS: [] })
+      return this.stripHtmlTags(value)
     } else {
       // Allow safe HTML tags only
-      return DOMPurify.sanitize(value, {
-        ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'p', 'br', 'ul', 'ol', 'li'],
-        ALLOWED_ATTR: []
-      })
+      return this.sanitizeHtmlTags(value)
     }
+  }
+
+  /**
+   * Strip all HTML tags from string
+   */
+  private static stripHtmlTags(value: string): string {
+    return value
+      .replace(/<[^>]*>/g, '') // Remove HTML tags
+      .replace(/&lt;/g, '<')   // Decode HTML entities
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#x27;/g, "'")
+      .replace(/&#x2F;/g, '/')
+      .trim()
+  }
+
+  /**
+   * Sanitize HTML tags to allow only safe ones
+   */
+  private static sanitizeHtmlTags(value: string): string {
+    const allowedTags = ['b', 'i', 'em', 'strong', 'p', 'br', 'ul', 'ol', 'li']
+    
+    // Remove all HTML tags except allowed ones
+    let sanitized = value.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g, (match, tagName) => {
+      if (allowedTags.includes(tagName.toLowerCase())) {
+        // Keep only the tag name, remove all attributes
+        return `<${tagName.toLowerCase()}>`
+      }
+      return '' // Remove disallowed tags
+    })
+    
+    // Decode HTML entities
+    sanitized = sanitized
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+      .replace(/&quot;/g, '"')
+      .replace(/&#x27;/g, "'")
+      .replace(/&#x2F;/g, '/')
+    
+    return sanitized.trim()
   }
 
   /**

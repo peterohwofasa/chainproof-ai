@@ -1,12 +1,6 @@
-import { promises as fs } from 'fs';
-import { join } from 'path';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { config } from './config';
 import { logger } from './logger';
 import { db } from './db';
-
-const execAsync = promisify(exec);
 
 export interface BackupConfig {
   schedule: string;
@@ -27,15 +21,45 @@ export interface BackupInfo {
 
 export class DatabaseBackup {
   private backupDir: string;
+  private fs: any = null;
+  private path: any = null;
+  private execAsync: any = null;
 
   constructor() {
     this.backupDir = config.BACKUP_DIR;
-    this.ensureBackupDirectory();
+    // Only initialize file system operations in Node.js environment
+    if (typeof window === 'undefined' && typeof process !== 'undefined' && process.env.NODE_ENV !== 'test') {
+      this.initializeFileSystem();
+    }
+  }
+
+  private async initializeFileSystem() {
+    try {
+      const [fsModule, pathModule, { exec }, { promisify }] = await Promise.all([
+        import('fs').then(m => m.promises),
+        import('path'),
+        import('child_process'),
+        import('util')
+      ]);
+      
+      this.fs = fsModule;
+      this.path = pathModule;
+      this.execAsync = promisify(exec);
+      
+      await this.ensureBackupDirectory();
+    } catch (error) {
+      logger.warn('File system operations not available in this environment', { error });
+    }
   }
 
   private async ensureBackupDirectory(): Promise<void> {
+    if (!this.fs) {
+      logger.warn('File system not available, skipping backup directory creation');
+      return;
+    }
+    
     try {
-      await fs.mkdir(this.backupDir, { recursive: true });
+      await this.fs.mkdir(this.backupDir, { recursive: true });
     } catch (error) {
       logger.error('Failed to create backup directory', { error, backupDir: this.backupDir });
       throw error;
@@ -44,10 +68,14 @@ export class DatabaseBackup {
 
   // Create a backup of the database
   async createBackup(options: { compress?: boolean; description?: string } = {}): Promise<BackupInfo> {
+    if (!this.fs || !this.path) {
+      throw new Error('File system operations not available in this environment');
+    }
+
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupId = `backup_${timestamp}`;
     const filename = `${backupId}.db`;
-    const filepath = join(this.backupDir, filename);
+    const filepath = this.path.join(this.backupDir, filename);
     
     logger.info('Starting database backup', { backupId, filename });
 
@@ -56,10 +84,10 @@ export class DatabaseBackup {
       const dbPath = config.DATABASE_URL.replace('file:', '');
       
       // Copy the database file
-      await fs.copyFile(dbPath, filepath);
+      await this.fs.copyFile(dbPath, filepath);
       
       // Get file stats
-      const stats = await fs.stat(filepath);
+      const stats = await this.fs.stat(filepath);
       
       let finalPath = filepath;
       let compressed = false;
@@ -69,20 +97,20 @@ export class DatabaseBackup {
       if (options.compress !== false) {
         try {
           const compressedPath = `${filepath}.gz`;
-          await execAsync(`gzip -c "${filepath}" > "${compressedPath}"`);
+          await this.execAsync(`gzip -c "${filepath}" > "${compressedPath}"`);
           
           // Verify compression was successful
-          const compressedStats = await fs.stat(compressedPath);
+          const compressedStats = await this.fs.stat(compressedPath);
           
           // Remove uncompressed file if compression is better
           if (compressedStats.size < stats.size) {
-            await fs.unlink(filepath);
+            await this.fs.unlink(filepath);
             finalPath = compressedPath;
             compressed = true;
             size = compressedStats.size;
           } else {
             // Remove compressed file if it's larger
-            await fs.unlink(compressedPath);
+            await this.fs.unlink(compressedPath);
           }
         } catch (compressError) {
           logger.warn('Compression failed, keeping uncompressed backup', { error: compressError });
@@ -119,7 +147,9 @@ export class DatabaseBackup {
       
       // Clean up partial backup
       try {
-        await fs.unlink(filepath);
+        if (this.fs) {
+          await this.fs.unlink(filepath);
+        }
       } catch {}
       
       throw error;
@@ -128,6 +158,10 @@ export class DatabaseBackup {
 
   // Restore database from backup
   async restoreBackup(backupId: string): Promise<void> {
+    if (!this.fs || !this.execAsync) {
+      throw new Error('File system operations not available in this environment');
+    }
+
     const backupInfo = await this.getBackupInfo(backupId);
     if (!backupInfo) {
       throw new Error(`Backup ${backupId} not found`);
@@ -141,17 +175,17 @@ export class DatabaseBackup {
 
       // If backup is compressed, decompress it first
       if (backupInfo.compressed) {
-        await execAsync(`gunzip -c "${backupInfo.path}" > "${tempPath}"`);
+        await this.execAsync(`gunzip -c "${backupInfo.path}" > "${tempPath}"`);
       } else {
-        await fs.copyFile(backupInfo.path, tempPath);
+        await this.fs.copyFile(backupInfo.path, tempPath);
       }
 
       // Verify the restored database
       await this.verifyDatabase(tempPath);
 
       // Replace the current database
-      await fs.unlink(dbPath);
-      await fs.rename(tempPath, dbPath);
+      await this.fs.unlink(dbPath);
+      await this.fs.rename(tempPath, dbPath);
 
       logger.info('Database restore completed successfully', { backupId });
     } catch (error) {
@@ -162,9 +196,14 @@ export class DatabaseBackup {
 
   // List all available backups
   async listBackups(): Promise<BackupInfo[]> {
+    if (!this.fs || !this.path) {
+      logger.warn('File system not available, returning empty backup list');
+      return [];
+    }
+
     try {
-      const metadataPath = join(this.backupDir, 'backups.json');
-      const metadata = await fs.readFile(metadataPath, 'utf-8');
+      const metadataPath = this.path.join(this.backupDir, 'backups.json');
+      const metadata = await this.fs.readFile(metadataPath, 'utf-8');
       const backups: BackupInfo[] = JSON.parse(metadata);
       
       // Sort by creation date (newest first)
@@ -185,6 +224,11 @@ export class DatabaseBackup {
 
   // Delete old backups based on retention policy
   async cleanupOldBackups(): Promise<void> {
+    if (!this.fs) {
+      logger.warn('File system not available, skipping backup cleanup');
+      return;
+    }
+
     const backups = await this.listBackups();
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - Number(config.BACKUP_RETENTION_DAYS));
@@ -203,7 +247,7 @@ export class DatabaseBackup {
 
     for (const backup of oldBackups) {
       try {
-        await fs.unlink(backup.path);
+        await this.fs.unlink(backup.path);
         logger.info('Deleted old backup', { backupId: backup.id, filename: backup.filename });
       } catch (error) {
         logger.error('Failed to delete old backup', { error, backupId: backup.id });
@@ -222,6 +266,11 @@ export class DatabaseBackup {
 
   // Verify backup integrity
   async verifyBackup(backupId: string): Promise<boolean> {
+    if (!this.fs) {
+      logger.warn('File system not available, skipping backup verification');
+      return false;
+    }
+
     const backupInfo = await this.getBackupInfo(backupId);
     if (!backupInfo) {
       return false;
@@ -229,7 +278,7 @@ export class DatabaseBackup {
 
     try {
       // Check if file exists
-      await fs.access(backupInfo.path);
+      await this.fs.access(backupInfo.path);
       
       // Verify checksum
       const currentChecksum = await this.calculateChecksum(backupInfo.path);
@@ -258,18 +307,28 @@ export class DatabaseBackup {
   }
 
   private async saveBackupMetadataList(backups: BackupInfo[]): Promise<void> {
-    const metadataPath = join(this.backupDir, 'backups.json');
-    await fs.writeFile(metadataPath, JSON.stringify(backups, null, 2));
+    if (!this.fs || !this.path) {
+      logger.warn('File system not available, skipping backup metadata save');
+      return;
+    }
+
+    const metadataPath = this.path.join(this.backupDir, 'backups.json');
+    await this.fs.writeFile(metadataPath, JSON.stringify(backups, null, 2));
   }
 
   private async calculateChecksum(filepath: string): Promise<string> {
+    if (!this.fs) {
+      logger.warn('File system not available, using timestamp as checksum');
+      return `fallback-${Date.now()}`;
+    }
+
     try {
       const { execSync } = await import('child_process');
       const stdout = execSync(`sha256sum "${filepath}"`, { encoding: 'utf8' });
       return stdout.split(' ')[0];
     } catch (error) {
       // Fallback: use file size and modification time
-      const stats = await fs.stat(filepath);
+      const stats = await this.fs.stat(filepath);
       return `${stats.size}-${stats.mtime.getTime()}`;
     }
   }

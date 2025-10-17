@@ -122,9 +122,6 @@ export async function requireAuth(req: Request): Promise<{ userId: string }> {
 }
 
 export const authOptions: NextAuthOptions = {
-  adapter: RedisAdapter({
-    baseKeyPrefix: 'chainproof:auth:',
-  }),
   providers: [
     CredentialsProvider({
       id: 'base-account',
@@ -295,7 +292,7 @@ export const authOptions: NextAuthOptions = {
     })
   ],
   session: {
-    strategy: 'database',
+    strategy: 'jwt',
     maxAge: 30 * 24 * 60 * 60, // 30 days
     updateAge: 24 * 60 * 60, // 24 hours
   },
@@ -306,9 +303,17 @@ export const authOptions: NextAuthOptions = {
   secret: config.NEXTAUTH_SECRET,
   useSecureCookies: process.env.NODE_ENV === 'production',
   callbacks: {
-    async session({ session, user }) {
+    async jwt({ token, user }) {
+      // Persist the user ID to the token right after signin
       if (user) {
-        session.user.id = user.id
+        token.id = user.id
+      }
+      return token
+    },
+    async session({ session, token }) {
+      // Send properties to the client
+      if (token) {
+        session.user.id = token.id as string
       }
       return session
     },

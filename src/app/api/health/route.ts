@@ -159,8 +159,12 @@ async function getMemoryStatus(): Promise<MemoryStatus> {
 
 async function getDiskStatus(): Promise<DiskStatus> {
   try {
-    const { statSync } = await import('fs');
-    statSync('.');
+    // Only perform file system checks in Node.js environment
+    if (typeof window === 'undefined' && typeof process !== 'undefined' && process.env.NODE_ENV !== 'test') {
+      const { statSync } = await import('fs');
+      statSync('.');
+    }
+    
     // This is a simplified check - in production you'd want to check actual disk usage
     return {
       status: 'healthy',

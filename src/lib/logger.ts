@@ -1,6 +1,3 @@
-import { createWriteStream, existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
-
 export enum LogLevel {
   ERROR = 'ERROR',
   WARN = 'WARN',
@@ -20,28 +17,47 @@ interface LogEntry {
 }
 
 class Logger {
-  private logDir: string;
-  private errorStream: NodeJS.WritableStream;
-  private combinedStream: NodeJS.WritableStream;
+  private logDir: string | null = null;
+  private errorStream: NodeJS.WritableStream | null = null;
+  private combinedStream: NodeJS.WritableStream | null = null;
+  private isInitialized = false;
 
   constructor() {
-    this.logDir = join(process.cwd(), 'logs');
-    
-    // Create logs directory if it doesn't exist
-    if (!existsSync(this.logDir)) {
-      mkdirSync(this.logDir, { recursive: true });
+    // Only initialize file streams in Node.js runtime, not during build
+    if (typeof window === 'undefined' && typeof process !== 'undefined' && process.env.NODE_ENV !== undefined) {
+      this.initializeFileStreams();
     }
+  }
 
-    // Create write streams
-    this.errorStream = createWriteStream(
-      join(this.logDir, 'error.log'),
-      { flags: 'a' }
-    );
-    
-    this.combinedStream = createWriteStream(
-      join(this.logDir, 'combined.log'),
-      { flags: 'a' }
-    );
+  private async initializeFileStreams() {
+    try {
+      // Dynamic imports to avoid bundling issues
+      const { createWriteStream, existsSync, mkdirSync } = await import('fs');
+      const { join } = await import('path');
+      
+      this.logDir = join(process.cwd(), 'logs');
+      
+      // Create logs directory if it doesn't exist
+      if (!existsSync(this.logDir)) {
+        mkdirSync(this.logDir, { recursive: true });
+      }
+
+      // Create write streams
+      this.errorStream = createWriteStream(
+        join(this.logDir, 'error.log'),
+        { flags: 'a' }
+      );
+      
+      this.combinedStream = createWriteStream(
+        join(this.logDir, 'combined.log'),
+        { flags: 'a' }
+      );
+      
+      this.isInitialized = true;
+    } catch (error) {
+      // Fallback to console-only logging if file system is not available
+      console.warn('File system logging not available, using console only');
+    }
   }
 
   private formatLogEntry(entry: LogEntry): string {
@@ -51,30 +67,30 @@ class Logger {
   private writeLog(entry: LogEntry) {
     const formattedLog = this.formatLogEntry(entry);
     
-    // Write to combined log
-    this.combinedStream.write(formattedLog);
-    
-    // Write to error log if it's an error
-    if (entry.level === LogLevel.ERROR) {
-      this.errorStream.write(formattedLog);
+    // Write to file streams if available
+    if (this.isInitialized && this.combinedStream) {
+      this.combinedStream.write(formattedLog);
+      
+      // Write to error log if it's an error
+      if (entry.level === LogLevel.ERROR && this.errorStream) {
+        this.errorStream.write(formattedLog);
+      }
     }
     
-    // Also log to console in development
-    if (process.env.NODE_ENV !== 'production') {
-      const consoleMessage = `[${entry.timestamp}] ${entry.level}: ${entry.message}`;
-      switch (entry.level) {
-        case LogLevel.ERROR:
-          console.error(consoleMessage, entry.context || '');
-          break;
-        case LogLevel.WARN:
-          console.warn(consoleMessage, entry.context || '');
-          break;
-        case LogLevel.DEBUG:
-          console.debug(consoleMessage, entry.context || '');
-          break;
-        default:
-          console.log(consoleMessage, entry.context || '');
-      }
+    // Always log to console for immediate visibility
+    const consoleMessage = `[${entry.timestamp}] ${entry.level}: ${entry.message}`;
+    switch (entry.level) {
+      case LogLevel.ERROR:
+        console.error(consoleMessage, entry.context || '');
+        break;
+      case LogLevel.WARN:
+        console.warn(consoleMessage, entry.context || '');
+        break;
+      case LogLevel.DEBUG:
+        console.debug(consoleMessage, entry.context || '');
+        break;
+      default:
+        console.log(consoleMessage, entry.context || '');
     }
   }
 
