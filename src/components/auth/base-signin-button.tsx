@@ -31,15 +31,15 @@ export function BaseSignInButton({
 
     try {
       // Connect to Base wallet
-      const baseAccount = await signInWithBase()
+      const walletAddress = await signInWithBase()
       
-      if (!baseAccount.isConnected || !baseAccount.address) {
+      if (!walletAddress) {
         throw new Error('Failed to connect to Base wallet')
       }
 
       // Sign in with NextAuth using the Base account
       const result = await signIn('base-account', {
-        address: baseAccount.address,
+        address: walletAddress,
         redirect: false,
         callbackUrl
       })
@@ -51,7 +51,7 @@ export function BaseSignInButton({
       if (result?.ok) {
         toast({
           title: "Connected Successfully",
-          description: `Signed in with Base account ${baseAccount.address.slice(0, 6)}...${baseAccount.address.slice(-4)}`,
+          description: `Signed in with Base account ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`,
         })
 
         onSuccess?.()
@@ -68,14 +68,11 @@ export function BaseSignInButton({
         errorMessage = error.message
       }
       
-      // Provide user-friendly error messages
-      if (errorMessage.includes('User rejected')) {
-        errorMessage = 'Connection was cancelled. Please try again and approve the connection.'
-      } else if (errorMessage.includes('No Base accounts')) {
-        errorMessage = 'No Base accounts found. Please make sure you have a Base wallet set up.'
-      } else if (errorMessage.includes('browser environment')) {
-        errorMessage = 'Base Account requires a web browser. Please try again in a browser.'
-      }
+      // Log additional details for debugging
+      console.log('Error details:', {
+        message: errorMessage,
+        error: error instanceof Error ? error.stack : error
+      })
       
       toast({
         title: "Connection Failed",

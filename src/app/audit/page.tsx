@@ -87,16 +87,16 @@ contract VulnerableToken is ERC20, Ownable {
       setIsAuditing(false)
       toast.success('Audit completed successfully!')
       
-      // Fetch the full audit report
-      if (auditId) {
-        fetchFullAuditReport(auditId)
-      }
+      // Redirect to test completion page
+      setTimeout(() => {
+        router.push('/test-completion')
+      }, 1500) // Small delay to show the success toast
     }
     if (progress && progress.status === 'ERROR') {
       setIsAuditing(false)
       toast.error(progress.message || 'Audit failed')
     }
-  }, [progress, auditId])
+  }, [progress, auditId, router])
 
   const fetchFullAuditReport = async (auditId: string) => {
     try {
@@ -104,11 +104,14 @@ contract VulnerableToken is ERC20, Ownable {
       if (response.ok) {
         const reportData = await response.json()
         setAuditResult(reportData.audit)
+        return reportData.audit
       } else {
         console.error('Failed to fetch audit report')
+        throw new Error('Failed to fetch audit report')
       }
     } catch (error) {
       console.error('Error fetching audit report:', error)
+      throw error
     }
   }
 
@@ -436,6 +439,8 @@ contract VulnerableToken is ERC20, Ownable {
           </Card>
         )}
       </div>
+      
+
     </div>
   )
 }

@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { withAuth } from '@/lib/middleware';
 import { logger } from '@/lib/logger';
-import { prisma } from '@/lib/db';
+import { db } from '@/lib/db';
 import { addSSEConnection, removeSSEConnection } from '@/lib/sse';
 
 export async function GET(
@@ -20,7 +20,7 @@ export async function GET(
     const { auditId } = params;
     
     // Verify user has access to this audit
-    const audit = await prisma.audit.findFirst({
+    const audit = await db.audit.findFirst({
       where: {
         id: auditId,
         userId: session.user.id
@@ -32,8 +32,12 @@ export async function GET(
     }
 
     // Create SSE stream
+    let streamController: ReadableStreamDefaultController<any>;
+    
     const stream = new ReadableStream({
       start(controller) {
+        streamController = controller;
+        
         // Add connection using utility function
         addSSEConnection(auditId, controller);
 
@@ -51,7 +55,6 @@ export async function GET(
             type: 'audit-progress',
             auditId,
             status: audit.status,
-            progress: audit.progress || 0,
             message: `Current status: ${audit.status}`,
             timestamp: new Date().toISOString()
           });
@@ -62,7 +65,7 @@ export async function GET(
       },
       cancel() {
         // Remove connection using utility function
-        removeSSEConnection(auditId, controller);
+        removeSSEConnection(auditId, streamController);
         logger.info('SSE connection closed', { auditId, userId: session.user.id });
       }
     });

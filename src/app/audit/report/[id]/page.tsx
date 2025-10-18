@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -16,8 +16,10 @@ import {
   Calendar,
   FileText,
   Bug,
-  Info
+  Info,
+  ChevronDown
 } from 'lucide-react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import Link from 'next/link'
 
 // Mock data for demonstration - in real app, this would come from API
@@ -132,6 +134,8 @@ export default function AuditReportPage() {
   const router = useRouter()
   const [auditData, setAuditData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [isExporting, setIsExporting] = useState(false)
+  const reportRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     const id = params.id as string
@@ -171,7 +175,7 @@ export default function AuditReportPage() {
     return 'text-red-600'
   }
 
-  const handleExportReport = () => {
+  const handleExportJSON = () => {
     if (!auditData) return
     
     const reportData = {
@@ -182,12 +186,94 @@ export default function AuditReportPage() {
     const dataStr = JSON.stringify(reportData, null, 2)
     const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr)
     
-    const exportFileDefaultName = `${auditData.contractName}_detailed_report.json`
+    const exportFileDefaultName = `${auditData.contractName}_audit_report.json`
     
     const linkElement = document.createElement('a')
     linkElement.setAttribute('href', dataUri)
     linkElement.setAttribute('download', exportFileDefaultName)
     linkElement.click()
+  }
+
+  const handleExportText = () => {
+    if (!auditData) return
+    
+    let textContent = `SMART CONTRACT AUDIT REPORT\n`
+    textContent += `${'='.repeat(50)}\n\n`
+    textContent += `Contract Name: ${auditData.contractName}\n`
+    textContent += `Generated: ${auditData.createdAt.toLocaleDateString()}\n`
+    textContent += `Overall Score: ${auditData.overallScore}/100\n`
+    textContent += `Risk Level: ${auditData.riskLevel}\n\n`
+    
+    textContent += `VULNERABILITIES FOUND\n`
+    textContent += `${'='.repeat(30)}\n\n`
+    
+    auditData.vulnerabilities.forEach((vuln: any, index: number) => {
+      textContent += `${index + 1}. ${vuln.title}\n`
+      textContent += `   Severity: ${vuln.severity}\n`
+      textContent += `   Location: ${vuln.location}\n`
+      textContent += `   Description: ${vuln.description}\n`
+      textContent += `   Recommendation: ${vuln.recommendation}\n\n`
+    })
+    
+    textContent += `CONTRACT CODE\n`
+    textContent += `${'='.repeat(20)}\n\n`
+    textContent += auditData.contractCode
+    
+    const blob = new Blob([textContent], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const linkElement = document.createElement('a')
+    linkElement.setAttribute('href', url)
+    linkElement.setAttribute('download', `${auditData.contractName}_audit_report.txt`)
+    linkElement.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExportPDF = async () => {
+    if (!auditData || !reportRef.current) return
+    
+    setIsExporting(true)
+    
+    try {
+      // Dynamic imports to avoid SSR issues
+      const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
+        import('jspdf'),
+        import('html2canvas')
+      ])
+      
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 2,
+        useCORS: true,
+        allowTaint: true,
+        backgroundColor: '#ffffff'
+      })
+      
+      const imgData = canvas.toDataURL('image/png')
+      const pdf = new jsPDF('p', 'mm', 'a4')
+      
+      const imgWidth = 210
+      const pageHeight = 295
+      const imgHeight = (canvas.height * imgWidth) / canvas.width
+      let heightLeft = imgHeight
+      
+      let position = 0
+      
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
+      heightLeft -= pageHeight
+      
+      while (heightLeft >= 0) {
+        position = heightLeft - imgHeight
+        pdf.addPage()
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
+        heightLeft -= pageHeight
+      }
+      
+      pdf.save(`${auditData.contractName}_audit_report.pdf`)
+    } catch (error) {
+      console.error('Error generating PDF:', error)
+      alert('Error generating PDF. Please try again.')
+    } finally {
+      setIsExporting(false)
+    }
   }
 
   if (loading) {
@@ -229,7 +315,7 @@ export default function AuditReportPage() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-8" ref={reportRef}>
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-4">
@@ -249,10 +335,29 @@ export default function AuditReportPage() {
             </p>
           </div>
         </div>
-        <Button onClick={handleExportReport}>
-          <Download className="w-4 h-4 mr-2" />
-          Export Report
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button disabled={isExporting}>
+              <Download className="w-4 h-4 mr-2" />
+              {isExporting ? 'Exporting...' : 'Export Report'}
+              <ChevronDown className="w-4 h-4 ml-2" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={handleExportPDF}>
+              <FileText className="w-4 h-4 mr-2" />
+              Export as PDF
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleExportText}>
+              <FileText className="w-4 h-4 mr-2" />
+              Export as Text
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleExportJSON}>
+              <Download className="w-4 h-4 mr-2" />
+              Export as JSON
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Summary */}

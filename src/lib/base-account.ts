@@ -2,14 +2,38 @@ import { createBaseAccountSDK, pay, getPaymentStatus } from '@base-org/account';
 
 // Base Account SDK configuration
 export const baseAccountConfig = {
-  appName: process.env.BASE_APP_NAME || 'ChainProof AI',
-  appLogoUrl: process.env.BASE_APP_LOGO_URL || '/chainproof-logo.png',
+  appName: process.env.NEXT_PUBLIC_BASE_APP_NAME || process.env.BASE_APP_NAME || 'ChainProof AI',
+  appLogoUrl: process.env.NEXT_PUBLIC_BASE_APP_LOGO_URL || process.env.BASE_APP_LOGO_URL || '/chainproof-logo.png',
+  appChainIds: [8453], // Base mainnet
   // Use testnet for development, set to false for production
-  testnet: process.env.BASE_TESTNET === 'true' || process.env.NODE_ENV !== 'production',
+  testnet: process.env.NEXT_PUBLIC_BASE_TESTNET === 'true' || process.env.BASE_TESTNET === 'true' || process.env.NODE_ENV !== 'production',
 };
 
-// Initialize Base Account SDK
-export const baseAccountSDK = createBaseAccountSDK(baseAccountConfig);
+// Initialize Base Account SDK with error handling
+let baseAccountSDKInstance: any = null;
+
+function getBaseAccountSDK() {
+  if (!baseAccountSDKInstance && typeof window !== 'undefined') {
+    try {
+      baseAccountSDKInstance = createBaseAccountSDK(baseAccountConfig);
+    } catch (error) {
+      console.warn('Failed to initialize Base Account SDK:', error);
+      throw new Error('Base Account SDK initialization failed');
+    }
+  }
+  return baseAccountSDKInstance;
+}
+
+// Export for backward compatibility
+export const baseAccountSDK = {
+  getProvider: () => {
+    const sdk = getBaseAccountSDK();
+    if (!sdk) {
+      throw new Error('Base Account SDK not available');
+    }
+    return sdk.getProvider();
+  }
+};
 
 // Base Pay integration
 export interface BasePaymentOptions {
@@ -73,40 +97,68 @@ export async function checkBasePaymentStatus(paymentId: string): Promise<BasePay
 /**
  * Sign in with Base Account
  */
-export async function signInWithBase(): Promise<{ address: string; isConnected: boolean }> {
+export async function signInWithBase(): Promise<string> {
+  if (typeof window === 'undefined') {
+    throw new Error('Base Account requires a browser environment')
+  }
+
   try {
-    // Check if we're in a browser environment
-    if (typeof window === 'undefined') {
-      throw new Error('Base Account SDK requires browser environment');
+    // Wait for the SDK to load if it's not available yet
+    let retries = 0;
+    const maxRetries = 10;
+    while (!(window as any).createBaseAccountSDK && retries < maxRetries) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      retries++;
     }
 
-    // Request account access using eth_requestAccounts
-    const provider = baseAccountSDK.getProvider();
-    const accounts = await provider.request({ 
-      method: 'eth_requestAccounts' 
-    }) as string[];
-    
-    if (accounts && accounts.length > 0) {
-      return {
-        address: accounts[0],
-        isConnected: true,
-      };
-    }
-    
-    throw new Error('No accounts found or user denied access');
-  } catch (error) {
-    console.error('Base sign-in failed:', error);
-    
-    // Provide more specific error messages
-    if (error instanceof Error) {
-      if (error.message.includes('User rejected')) {
-        throw new Error('User rejected the connection request');
-      } else if (error.message.includes('No accounts')) {
-        throw new Error('No Base accounts available');
+    // Try using the global window.createBaseAccountSDK if available
+    if ((window as any).createBaseAccountSDK) {
+      const sdk = (window as any).createBaseAccountSDK(baseAccountConfig);
+      const provider = sdk.getProvider();
+      
+      if (provider) {
+        const accounts = await provider.request({ method: 'eth_requestAccounts' });
+        if (accounts && accounts.length > 0) {
+          return accounts[0];
+        }
       }
     }
-    
-    throw new Error('Failed to connect to Base Account');
+
+    // Fallback to our SDK instance
+    const sdk = getBaseAccountSDK()
+    if (!sdk) {
+      throw new Error('Base Account SDK not initialized')
+    }
+
+    // Get the provider
+    const provider = sdk.getProvider()
+    if (!provider) {
+      throw new Error('Base Account provider not available')
+    }
+
+    // Request account access
+    let accounts: string[]
+    try {
+      accounts = await provider.request({ method: 'eth_requestAccounts' })
+    } catch (error: any) {
+      console.error('Provider request error:', error)
+      if (error.code === 4001) {
+        throw new Error('Connection was cancelled. Please try again and approve the connection.')
+      } else if (error.code === -32002) {
+        throw new Error('Connection request is already pending. Please check your wallet.')
+      } else {
+        throw new Error(`Failed to connect to Base Account: ${error.message || 'Unknown error'}`)
+      }
+    }
+
+    if (!accounts || accounts.length === 0) {
+      throw new Error('No Base accounts found. Please make sure you have a Base wallet set up.')
+    }
+
+    return accounts[0]
+  } catch (error) {
+    console.error('Base sign-in error:', error)
+    throw error
   }
 }
 
@@ -120,7 +172,16 @@ export async function getBaseAccountStatus(): Promise<{ address?: string; isConn
       return { isConnected: false };
     }
 
-    const provider = baseAccountSDK.getProvider();
+    const sdk = getBaseAccountSDK();
+    if (!sdk) {
+      return { isConnected: false };
+    }
+
+    const provider = sdk.getProvider();
+    if (!provider) {
+      return { isConnected: false };
+    }
+
     const accounts = await provider.request({ 
       method: 'eth_accounts' 
     }) as string[];

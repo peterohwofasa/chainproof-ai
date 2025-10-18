@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { apiKeyRotationService } from '@/lib/api-key-rotation'
 import { logger } from '@/lib/logger'
-import { ErrorHandler } from '@/lib/error-handler'
+import { withErrorHandler, ValidationError, AuthenticationError } from '@/lib/error-handler'
 import { withCSRFProtection } from '@/lib/csrf-protection'
 
 /**
@@ -46,7 +46,10 @@ export async function GET(request: NextRequest) {
     })
   } catch (error) {
     logger.error('Failed to retrieve API keys', { error })
-    return ErrorHandler.handleError(error, request)
+    return NextResponse.json(
+      { error: 'Failed to retrieve API keys' },
+      { status: 500 }
+    )
   }
 }
 
@@ -118,6 +121,9 @@ export const POST = withCSRFProtection(async (request: NextRequest) => {
     })
   } catch (error) {
     logger.error('Failed to create API key', { error })
-    return ErrorHandler.handleError(error, request)
+    return NextResponse.json(
+      { error: 'Failed to create API key' },
+      { status: 500 }
+    )
   }
 })

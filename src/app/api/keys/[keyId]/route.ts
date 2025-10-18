@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { apiKeyRotationService } from '@/lib/api-key-rotation'
 import { logger } from '@/lib/logger'
-import { ErrorHandler } from '@/lib/error-handler'
+import { withErrorHandler, ValidationError, AuthenticationError } from '@/lib/error-handler'
 import { withCSRFProtection } from '@/lib/csrf-protection'
 
 interface RouteParams {
@@ -64,7 +64,10 @@ export const POST = withCSRFProtection(async (request: NextRequest, { params }: 
     })
   } catch (error) {
     logger.error('Failed to rotate API key', { error, keyId: params.keyId })
-    return ErrorHandler.handleError(error, request)
+    return NextResponse.json(
+      { error: 'Failed to rotate API key' },
+      { status: 500 }
+    )
   }
 })
 
@@ -115,6 +118,9 @@ export const DELETE = withCSRFProtection(async (request: NextRequest, { params }
     })
   } catch (error) {
     logger.error('Failed to revoke API key', { error, keyId: params.keyId })
-    return ErrorHandler.handleError(error, request)
+    return NextResponse.json(
+      { error: 'Failed to revoke API key' },
+      { status: 500 }
+    )
   }
 })
