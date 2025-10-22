@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { createStripeCheckoutSession } from '@/lib/stripe'
-import { db } from '@/lib/db'
+import { connectDB, User } from '@/models'
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,11 +25,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Connect to MongoDB
+    await connectDB()
+
     // Get user details
-    const user = await db.user.findUnique({
-      where: { id: session.user.id },
-      select: { email: true, name: true }
-    })
+    const user = await User.findById(session.user.id)
+      .select('email name')
+      .lean()
 
     if (!user) {
       return NextResponse.json(

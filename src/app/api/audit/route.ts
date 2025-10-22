@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '../../../lib/auth'
-import { db } from '../../../lib/db'
+import connectDB from '../../../lib/mongodb'
+import { User, Subscription, Contract, Audit, Vulnerability, AuditReport, AuditStatus, AuditType, SubscriptionStatus } from '../../../models'
 import ZAI from 'z-ai-web-dev-sdk'
 import { emitAuditProgress, emitAuditCompleted, emitAuditError } from '../../../lib/sse'
 import { auditRequestSchema, validateContractCode } from '../../../lib/validations'
@@ -17,6 +18,9 @@ import { AuditLogger, AuditEventType, AuditSeverity } from '../../../lib/audit-l
 // No need for global Socket.IO instance
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
+  // Connect to MongoDB
+  await connectDB()
+  
   // SSE is handled by utility functions, no need for socket instance
   
   // Authentication check
@@ -114,11 +118,9 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   }
 
   // Check user's subscription and free trial status
-  const subscription = await db.subscription.findFirst({
-    where: {
-      userId: session.user.id,
-      status: 'ACTIVE'
-    }
+  const subscription = await Subscription.findOne({
+    userId: session.user.id,
+    status: SubscriptionStatus.ACTIVE
   })
 
   if (!subscription) {
@@ -149,24 +151,20 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   }
 
   // Create contract record
-  const contract = await db.contract.create({
-    data: {
-      name: finalContractName || 'Untitled Contract',
-      sourceCode: finalContractCode || '',
-      address: contractAddress || null,
-      compilerVersion,
-      optimizationEnabled,
-    },
+  const contract = await Contract.create({
+    name: finalContractName || 'Untitled Contract',
+    sourceCode: finalContractCode || '',
+    address: contractAddress || null,
+    compilerVersion,
+    optimizationEnabled,
   })
 
   // Create audit record
-  const audit = await db.audit.create({
-    data: {
-      contractId: contract.id,
-      userId: session.user.id,
-      status: 'RUNNING',
-      startedAt: new Date(),
-    },
+  const audit = await Audit.create({
+    contractId: contract._id.toString(),
+    userId: session.user.id,
+    status: AuditStatus.RUNNING,
+    startedAt: new Date(),
   })
 
   // Log audit start event
@@ -178,8 +176,8 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     resource: 'smart_contract_audit',
     action: 'AUDIT_STARTED',
     details: {
-      auditId: audit.id,
-      contractId: contract.id,
+      auditId: audit._id.toString(),
+      contractId: contract._id.toString(),
       contractName: finalContractName,
       contractAddress,
       network: contractNetwork,
@@ -191,17 +189,14 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
 
   // Deduct one credit (only if not in free trial and not in testing mode)
   if (!isInFreeTrial && !allowTesting) {
-    await db.subscription.update({
-      where: { id: subscription.id },
-      data: {
-        creditsRemaining: subscription.creditsRemaining - 1
-      }
+    await Subscription.findByIdAndUpdate(subscription._id, {
+      creditsRemaining: subscription.creditsRemaining - 1
     })
   }
 
   // Emit initial progress via SSE
-  emitAuditProgress(audit.id, {
-    auditId: audit.id,
+  emitAuditProgress(audit._id.toString(), {
+    auditId: audit._id.toString(),
     status: 'STARTED',
     progress: 10,
     message: 'Initializing security analysis...',
@@ -212,7 +207,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   // Perform AI analysis with progress updates
   const analysisResult = await analyzeContractWithProgress(
     finalContractCode || '', 
-    audit.id,
+    audit._id.toString(),
     {
       compilerVersion,
       optimizationEnabled,
@@ -222,51 +217,44 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   )
 
   // Update audit with results
-  const updatedAudit = await db.audit.update({
-    where: { id: audit.id },
-    data: {
-      status: 'COMPLETED',
-      overallScore: analysisResult.overallScore,
-      riskLevel: analysisResult.riskLevel,
-      auditDuration: analysisResult.duration,
-      completedAt: new Date(),
-    },
-  })
+  const updatedAudit = await Audit.findByIdAndUpdate(audit._id, {
+    status: AuditStatus.COMPLETED,
+    overallScore: analysisResult.overallScore,
+    riskLevel: analysisResult.riskLevel,
+    auditDuration: analysisResult.duration,
+    completedAt: new Date(),
+  }, { new: true })
 
   // Create vulnerability records
   if (analysisResult.vulnerabilities && analysisResult.vulnerabilities.length > 0) {
     await Promise.all(
       analysisResult.vulnerabilities.map((vuln: any) =>
-        db.vulnerability.create({
-          data: {
-            auditId: audit.id,
-            title: vuln.title,
-            description: vuln.description,
-            severity: vuln.severity,
-            category: vuln.category,
-            lineNumbers: vuln.lineNumbers ? JSON.stringify(vuln.lineNumbers) : null,
-            codeSnippet: vuln.codeSnippet || null,
-            recommendation: vuln.recommendation,
-            cweId: vuln.cweId || null,
-            swcId: vuln.swcId || null,
-          },
+        Vulnerability.create({
+          auditId: audit._id.toString(),
+          title: vuln.title,
+          description: vuln.description,
+          severity: vuln.severity,
+          category: vuln.category,
+          lineNumbers: vuln.lineNumbers ? JSON.stringify(vuln.lineNumbers) : null,
+          codeSnippet: vuln.codeSnippet || null,
+          recommendation: vuln.recommendation,
+          cweId: vuln.cweId || null,
+          swcId: vuln.swcId || null,
         })
       )
     )
   }
 
   // Create audit report
-  await db.auditReport.create({
-    data: {
-      auditId: audit.id,
-      reportType: 'FULL',
-      content: JSON.stringify(analysisResult),
-    },
+  await AuditReport.create({
+    auditId: audit._id.toString(),
+    reportType: 'FULL',
+    content: JSON.stringify(analysisResult),
   })
 
   // Emit completion via SSE
-  emitAuditCompleted(audit.id, {
-    auditId: audit.id,
+  emitAuditCompleted(audit._id.toString(), {
+    auditId: audit._id.toString(),
     overallScore: analysisResult.overallScore,
     riskLevel: analysisResult.riskLevel,
     vulnerabilities: analysisResult.vulnerabilities,
@@ -282,8 +270,8 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     resource: 'smart_contract_audit',
     action: 'AUDIT_COMPLETED',
     details: {
-      auditId: audit.id,
-      contractId: contract.id,
+      auditId: audit._id.toString(),
+      contractId: contract._id.toString(),
       overallScore: analysisResult.overallScore,
       riskLevel: analysisResult.riskLevel,
       vulnerabilityCount: analysisResult.vulnerabilities?.length || 0,
@@ -295,7 +283,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
 
   return NextResponse.json({
     success: true,
-    auditId: audit.id,
+    auditId: audit._id.toString(),
     overallScore: analysisResult.overallScore,
     riskLevel: analysisResult.riskLevel,
     vulnerabilities: analysisResult.vulnerabilities,

@@ -72,6 +72,6 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "3. Configure monitoring and analytics" -ForegroundColor White
     Write-Host "4. Test Base Pay integration with small amounts" -ForegroundColor White
 } else {
-    Write-Host "❌ Deployment failed. Check the logs above for details." -ForegroundColor Red
+    Write-Host "X Deployment failed. Check the logs above for details." -ForegroundColor Red
     exit 1
 }

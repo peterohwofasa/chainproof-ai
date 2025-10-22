@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db } from '@/lib/db'
+import { connectDB } from '@/lib/mongodb'
+import { Payment, Audit } from '@/models'
 import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -35,9 +38,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if payment already exists
-    const existingPayment = await db.payment.findUnique({
-      where: { transactionHash }
-    })
+    const existingPayment = await Payment.findOne({ transactionHash }).lean()
 
     if (existingPayment) {
       return NextResponse.json(
@@ -47,34 +48,29 @@ export async function POST(request: NextRequest) {
     }
 
     // Create payment record
-    const payment = await db.payment.create({
-      data: {
-        userId: session.user.id,
-        amount: parseFloat(amount),
-        currency: 'USD',
-        status: 'completed', // CDP transactions are immediately confirmed
-        paymentMethod: 'cdp_wallet',
-        transactionHash,
+    const payment = await Payment.create({
+      userId: session.user.id,
+      amount: parseFloat(amount),
+      currency: 'USD',
+      status: 'COMPLETED', // CDP transactions are immediately confirmed
+      paymentMethod: 'cdp_wallet',
+      transactionHash,
+      metadata: {
+        paymentType: 'cdp_embedded_wallet',
+        walletType: 'cdp',
         walletAddress,
         network: network || 'base',
         planName,
         auditId,
-        metadata: {
-          paymentType: 'cdp_embedded_wallet',
-          walletType: 'cdp',
-          timestamp: new Date().toISOString()
-        }
+        timestamp: new Date().toISOString()
       }
     })
 
     // If this is for an audit, update the audit status
     if (auditId) {
       try {
-        await db.audit.update({
-          where: { id: auditId },
-          data: {
-            status: 'COMPLETED'
-          }
+        await Audit.findByIdAndUpdate(auditId, {
+          status: 'COMPLETED'
         })
       } catch (error) {
         logger.error('Failed to update audit status:', error)
@@ -83,7 +79,7 @@ export async function POST(request: NextRequest) {
     }
 
     logger.info('CDP payment recorded successfully', {
-      paymentId: payment.id,
+      paymentId: payment._id.toString(),
       userId: session.user.id,
       amount,
       transactionHash
@@ -91,7 +87,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      paymentId: payment.id,
+      paymentId: payment._id.toString(),
       transactionHash,
       status: 'completed'
     })
@@ -108,6 +104,8 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -129,14 +127,12 @@ export async function GET(request: NextRequest) {
     }
 
     // Find payment by transaction hash or payment ID
-    const payment = await db.payment.findFirst({
-      where: {
-        AND: [
-          { userId: session.user.id },
-          transactionHash ? { transactionHash } : { id: paymentId }
-        ]
-      }
-    })
+    const query = {
+      userId: session.user.id,
+      ...(transactionHash ? { transactionHash } : { _id: paymentId })
+    }
+    
+    const payment = await Payment.findOne(query).lean()
 
     if (!payment) {
       return NextResponse.json(
@@ -146,13 +142,13 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      id: payment.id,
+      id: payment._id.toString(),
       status: payment.status,
       amount: payment.amount,
       currency: payment.currency,
       transactionHash: payment.transactionHash,
-      walletAddress: payment.walletAddress,
-      network: payment.network,
+      walletAddress: payment.metadata?.walletAddress,
+      network: payment.metadata?.network,
       createdAt: payment.createdAt
     })
 

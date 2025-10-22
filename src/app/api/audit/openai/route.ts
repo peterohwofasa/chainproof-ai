@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getServerSession } from 'next-auth'
-import { authOptions } from '../../../../lib/auth'
-import { db } from '../../../../lib/db'
+import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth/next';
+import { authOptions } from '@/lib/auth';
+import connectDB from '../../../../lib/mongodb';
+import { Contract, Audit, User } from '../../../../models'
 import { runOpenAIAudit, formatOpenAIAuditForChainProof, OpenAIAuditInput } from '../../../../lib/openai-agent'
 import { emitAuditProgress, emitAuditCompleted, emitAuditError } from '../../../../lib/sse'
 import { auditRequestSchema, validateContractCode } from '../../../../lib/validations'
@@ -15,6 +16,8 @@ import { createBlockchainExplorer, detectNetwork, SUPPORTED_NETWORKS } from '../
 
 export const POST = withErrorHandler(async (request: NextRequest) => {
   // SSE is handled by utility functions, no need for socket instance
+  
+  await connectDB()
   
   // Authentication check
   const authResponse = await withAuth(request)
@@ -90,17 +93,14 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     }
   }
 
-  // Check user's subscription and free trial status
-  const subscription = await db.subscription.findFirst({
-    where: {
-      userId: session.user.id,
-      status: 'ACTIVE'
-    }
-  })
+  // Check user subscription status
+  const user = await User.findById(session.user.id).populate('subscription')
 
-  if (!subscription) {
+  if (!user || !user.subscription) {
     throw new ValidationError('No active subscription found. Please contact support.')
   }
+
+  const subscription = user.subscription
 
   // Check if user is in free trial period
   const now = new Date()
@@ -126,22 +126,18 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   }
 
   // Create contract record
-  const contract = await db.contract.create({
-    data: {
-      name: finalContractName || 'Untitled Contract',
-      sourceCode: finalContractCode || '',
-      address: contractAddress || null,
-    },
+  const contract = await Contract.create({
+    name: finalContractName || 'Untitled Contract',
+    sourceCode: finalContractCode || '',
+    address: contractAddress || null,
   })
 
   // Create audit record
-  const audit = await db.audit.create({
-    data: {
-      userId: session.user.id,
-      contractId: contract.id,
-      status: 'PENDING',
-      // Note: auditType will be added when Prisma schema is updated
-    },
+  const audit = await Audit.create({
+    userId: session.user.id,
+    contractId: contract._id,
+    status: 'PENDING',
+    auditType: 'OPENAI_AGENT',
   })
 
   // Emit initial progress
@@ -166,30 +162,26 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     console.error('OpenAI agent audit error:', error)
     
     // Update audit status to failed
-    await db.audit.update({
-      where: { id: audit.id },
-      data: { 
-        status: 'FAILED'
-        // Note: errorMessage will be added when Prisma schema is updated
-      },
+    await Audit.findByIdAndUpdate(audit._id, { 
+      status: 'FAILED',
+      errorMessage: error.message || 'OpenAI agent audit failed'
     })
 
     // Emit error
-    emitAuditError(audit.id, error.message || 'OpenAI agent audit failed')
+    emitAuditError(audit._id.toString(), error.message || 'OpenAI agent audit failed')
   })
 
   // Deduct credits if not in free trial and not in testing mode
   if (!isInFreeTrial && !allowTesting) {
-    await db.subscription.update({
-      where: { id: subscription.id },
-      data: { creditsRemaining: subscription.creditsRemaining - 1 },
+    await User.findByIdAndUpdate(session.user.id, {
+      $inc: { 'subscription.creditsRemaining': -1 }
     })
   }
 
   const response = NextResponse.json({
     success: true,
-    auditId: audit.id,
-    contractId: contract.id,
+    auditId: audit._id.toString(),
+    contractId: contract._id.toString(),
     message: 'OpenAI agent audit started successfully',
     auditType: 'OPENAI_AGENT'
   })
@@ -256,21 +248,18 @@ async function analyzeContractWithOpenAI(
     })
 
     // Update audit with results
-    await db.audit.update({
-      where: { id: auditId },
-      data: {
-        status: 'COMPLETED',
-        overallScore: formattedResults.score,
-        completedAt: new Date(),
-        // Store the full OpenAI analysis and results in metadata
-        metadata: JSON.stringify({
-          openAIAnalysis: formattedResults.openAIAnalysis,
-          auditType: 'OPENAI_AGENT',
-          vulnerabilities: formattedResults.vulnerabilities,
-          gasOptimizations: formattedResults.gasOptimizations,
-          summary: formattedResults.summary
-        })
-      },
+    await Audit.findByIdAndUpdate(auditId, {
+      status: 'COMPLETED',
+      overallScore: formattedResults.score,
+      completedAt: new Date(),
+      // Store the full OpenAI analysis and results in metadata
+      metadata: {
+        openAIAnalysis: formattedResults.openAIAnalysis,
+        auditType: 'OPENAI_AGENT',
+        vulnerabilities: formattedResults.vulnerabilities,
+        gasOptimizations: formattedResults.gasOptimizations,
+        summary: formattedResults.summary
+      }
     })
 
     emitAuditProgress(auditId, {
@@ -291,12 +280,9 @@ async function analyzeContractWithOpenAI(
     console.error('OpenAI agent audit error:', error)
     
     // Update audit status to failed
-    await db.audit.update({
-      where: { id: auditId },
-      data: { 
-        status: 'FAILED'
-        // Note: errorMessage will be added when Prisma schema is updated
-      },
+    await Audit.findByIdAndUpdate(auditId, { 
+      status: 'FAILED',
+      errorMessage: error instanceof Error ? error.message : 'OpenAI agent audit failed'
     })
 
     // Emit error

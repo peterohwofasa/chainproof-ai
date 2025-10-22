@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db } from '@/lib/db'
+import { connectDB } from '@/lib/mongodb'
+import { TeamMember, Activity } from '@/models'
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ teamId: string, memberId: string }> }
+  { params }: { params: Promise<{ teamId: string; memberId: string }> }
 ) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -20,47 +23,33 @@ export async function DELETE(
     const { teamId, memberId } = await params
 
     // Check if user has permission to remove members (owner or admin)
-    const teamMember = await db.teamMember.findFirst({
-      where: {
-        teamId,
-        userId: session.user.id,
-        role: {
-          in: ['OWNER', 'ADMIN']
-        }
-      }
-    })
+    const userMember = await TeamMember.findOne({
+      teamId,
+      userId: session.user.id,
+      role: { $in: ['OWNER', 'ADMIN'] }
+    }).lean()
 
-    if (!teamMember) {
+    if (!userMember) {
       return NextResponse.json(
-        { error: 'Insufficient permissions to remove members' },
+        { error: 'Insufficient permissions' },
         { status: 403 }
       )
     }
 
-    // Get member to be removed
-    const memberToRemove = await db.teamMember.findFirst({
-      where: {
-        id: memberId,
-        teamId
-      },
-      include: {
-        user: {
-          select: {
-            name: true,
-            email: true
-          }
-        }
-      }
-    })
+    // Get the member to be removed
+    const memberToRemove = await TeamMember.findOne({
+      _id: memberId,
+      teamId
+    }).populate('userId', 'name email').lean()
 
     if (!memberToRemove) {
       return NextResponse.json(
-        { error: 'Team member not found' },
+        { error: 'Member not found' },
         { status: 404 }
       )
     }
 
-    // Cannot remove the owner
+    // Prevent removing the team owner
     if (memberToRemove.role === 'OWNER') {
       return NextResponse.json(
         { error: 'Cannot remove team owner' },
@@ -69,23 +58,19 @@ export async function DELETE(
     }
 
     // Remove the member
-    await db.teamMember.delete({
-      where: {
-        id: memberId
-      }
-    })
+    await TeamMember.findByIdAndDelete(memberId)
 
     // Create activity log
-    await db.activity.create({
-      data: {
-        userId: session.user.id,
-        action: 'TEAM_JOINED',
-        target: teamId,
-        metadata: JSON.stringify({ 
-          removedMember: memberToRemove.user.email,
-          action: 'removed'
-        })
-      }
+    await Activity.create({
+      userId: session.user.id,
+      action: 'TEAM_LEFT',
+      target: teamId,
+      metadata: JSON.stringify({ 
+        removedMember: {
+          name: memberToRemove.userId.name,
+          email: memberToRemove.userId.email
+        }
+      })
     })
 
     return NextResponse.json({ 

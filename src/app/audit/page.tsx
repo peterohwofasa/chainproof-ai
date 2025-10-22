@@ -17,6 +17,54 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Upload, FileText, Link2, AlertCircle, CheckCircle2, Shield, Code, Zap, Clock, Activity, Coins, Globe } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuditProgress } from '@/hooks/use-audit-progress'
+import { AuditCompletion } from '@/components/audit-completion'
+import { AuditProgress } from '@/components/audit-progress'
+
+// Type definition for audit results
+interface AuditData {
+  id: string
+  contractName: string
+  status: 'pending' | 'completed' | 'failed'
+  createdAt: Date
+  updatedAt: Date
+  contractCode: string
+  contractAddress?: string | null
+  network?: string | null
+  vulnerabilities: Array<{
+    id: string
+    type: string
+    severity: 'low' | 'medium' | 'high' | 'critical'
+    title: string
+    description: string
+    location: string
+    recommendation: string
+    confidence: number
+  }>
+  gasOptimizations: Array<{
+    id: string
+    type: string
+    title: string
+    description: string
+    location: string
+    recommendation: string
+    gasSaved: number
+  }>
+  score: number
+  overallScore: number
+  riskLevel: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
+  aiAnalysis?: {
+    summary: string
+    recommendations: string[]
+  }
+  auditReport?: {
+    id: string
+    reportType: string
+    content: any
+    ipfsHash?: string | null
+    blockchainTxHash?: string | null
+    createdAt: Date
+  }
+}
 
 function AuditPageContent() {
   const { data: session, status } = useSession()
@@ -28,7 +76,8 @@ function AuditPageContent() {
   const [network, setNetwork] = useState('ethereum')
   const [isAuditing, setIsAuditing] = useState(false)
   const [auditId, setAuditId] = useState<string | null>(null)
-  const [auditResult, setAuditResult] = useState<any>(null)
+  const [auditResult, setAuditResult] = useState<AuditData | null>(null)
+  const [showCompletionModal, setShowCompletionModal] = useState(false)
 
   const { progress, isConnected, error, joinAudit, leaveAudit } = useAuditProgress()
 
@@ -87,16 +136,16 @@ contract VulnerableToken is ERC20, Ownable {
       setIsAuditing(false)
       toast.success('Audit completed successfully!')
       
-      // Redirect to test completion page
+      // Show completion modal instead of immediate redirect
       setTimeout(() => {
-        router.push('/test-completion')
-      }, 1500) // Small delay to show the success toast
+        setShowCompletionModal(true)
+      }, 2000) // Allow time to see 100% progress
     }
     if (progress && progress.status === 'ERROR') {
       setIsAuditing(false)
       toast.error(progress.message || 'Audit failed')
     }
-  }, [progress, auditId, router])
+  }, [progress, auditId])
 
   const fetchFullAuditReport = async (auditId: string) => {
     try {
@@ -356,20 +405,16 @@ contract VulnerableToken is ERC20, Ownable {
                 </TabsContent>
               </Tabs>
 
-              {isAuditing && progress && (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2">
-                    {getStatusIcon(progress.status)}
-                    <span className="text-sm font-medium">{progress.message}</span>
-                  </div>
-                  <Progress value={progress.progress} className="w-full" />
-                  <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
-                    <span>{progress.currentStep}</span>
-                    {progress.estimatedTimeRemaining && (
-                      <span>~{progress.estimatedTimeRemaining}s remaining</span>
-                    )}
-                  </div>
-                </div>
+              {isAuditing && (
+                <AuditProgress 
+                  auditId={auditId || undefined}
+                  onComplete={(result: AuditData) => {
+                    setAuditResult(result)
+                    setIsAuditing(false)
+                    setShowCompletionModal(true)
+                    toast.success('Audit completed successfully!')
+                  }}
+                />
               )}
 
               {error && (
@@ -440,6 +485,22 @@ contract VulnerableToken is ERC20, Ownable {
         )}
       </div>
       
+      {/* Completion Modal */}
+      {showCompletionModal && auditId && (
+        <AuditCompletion 
+          auditId={auditId} 
+          onClose={() => {
+            setShowCompletionModal(false)
+            // Reset form for new audit
+            setAuditResult(null)
+            setAuditId(null)
+            setContractCode('')
+            setContractAddress('')
+            setContractName('')
+            setNetwork('ethereum')
+          }}
+        />
+      )}
 
     </div>
   )
@@ -453,7 +514,7 @@ export default function AuditPage() {
   )
 }
 
-function AuditResults({ result, onNewAudit }: { result: any, onNewAudit: () => void }) {
+function AuditResults({ result, onNewAudit }: { result: AuditData, onNewAudit: () => void }) {
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case 'CRITICAL': return 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300'

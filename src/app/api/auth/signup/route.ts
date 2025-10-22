@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
-import { db } from '@/lib/db'
+import { connectDB, User, Subscription, SubscriptionPlan, SubscriptionStatus } from '@/models'
 import { signupSchema } from '@/lib/validations'
 import { sanitizeRequestBody } from '@/lib/middleware'
 import { SecurityUtils } from '@/lib/security'
 
 async function handler(request: NextRequest) {
   try {
+    await connectDB()
 
     // Parse and validate request body
     let body
@@ -37,11 +38,7 @@ async function handler(request: NextRequest) {
     const { name, email, password } = validationResult.data
     
     // Check if user already exists
-    const existingUser = await db.user.findUnique({
-      where: {
-        email: email
-      }
-    })
+    const existingUser = await User.findOne({ email }).lean()
 
     if (existingUser) {
       return NextResponse.json(
@@ -57,21 +54,12 @@ async function handler(request: NextRequest) {
     const verificationToken = SecurityUtils.generateSecureToken(32)
 
     // Create user
-    const user = await db.user.create({
-      data: {
-        name: name,
-        email: email,
-        password: hashedPassword,
-        emailVerificationToken: verificationToken,
-        emailVerified: process.env.NODE_ENV === 'development', // Auto-verify in development
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        createdAt: true,
-        emailVerified: true,
-      }
+    const user = await User.create({
+      name: name,
+      email: email,
+      password: hashedPassword,
+      emailVerificationToken: verificationToken,
+      emailVerified: process.env.NODE_ENV === 'development', // Auto-verify in development
     })
 
     // Create default subscription with 7-day free trial
@@ -79,21 +67,28 @@ async function handler(request: NextRequest) {
     const freeTrialEnds = new Date()
     freeTrialEnds.setDate(freeTrialStarted.getDate() + 7) // 7 days from now
 
-    await db.subscription.create({
-      data: {
-        userId: user.id,
-        plan: 'FREE',
-        status: 'ACTIVE',
-        creditsRemaining: 999, // Generous credits during free trial
-        isFreeTrial: true,
-        freeTrialStarted,
-        freeTrialEnds,
-      } as any
+    await Subscription.create({
+      userId: user._id.toString(),
+      plan: SubscriptionPlan.FREE,
+      status: SubscriptionStatus.ACTIVE,
+      creditsRemaining: 999, // Generous credits during free trial
+      isFreeTrial: true,
+      freeTrialStarted,
+      freeTrialEnds,
     })
+
+    // Prepare user response data
+    const userResponse = {
+      id: user._id.toString(),
+      name: user.name,
+      email: user.email,
+      createdAt: user.createdAt,
+      emailVerified: user.emailVerified,
+    }
 
     return NextResponse.json({
       message: 'User created successfully',
-      user,
+      user: userResponse,
       verificationRequired: process.env.NODE_ENV !== 'development',
       verificationToken: process.env.NODE_ENV !== 'development' ? verificationToken : undefined // Only send token in production
     })

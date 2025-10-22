@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { authenticator } from 'otplib'
-import { db } from '@/lib/db'
+import { connectDB, User } from '@/models'
 
 export async function POST(request: NextRequest) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -25,6 +27,33 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Get user and verify they have the secret stored
+    const user = await User.findById(session.user.id).select({
+      twoFactorSecret: 1,
+      twoFactorEnabled: 1
+    }).lean()
+
+    if (!user) {
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      )
+    }
+
+    if ((user as any).twoFactorEnabled) {
+      return NextResponse.json(
+        { error: 'Two-factor authentication is already enabled' },
+        { status: 400 }
+      )
+    }
+
+    if (!(user as any).twoFactorSecret || (user as any).twoFactorSecret !== secret) {
+      return NextResponse.json(
+        { error: 'Invalid secret. Please generate a new 2FA setup.' },
+        { status: 400 }
+      )
+    }
+
     // Verify the token
     const isValid = authenticator.verify({ token, secret })
 
@@ -36,15 +65,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Enable 2FA for the user
-    // Note: You'll need to add twoFactorSecret and twoFactorEnabled fields to your User model
-    await db.user.update({
-      where: { id: session.user.id },
-      data: {
-        // For now, we'll simulate this
-        // In a real implementation, you'd store the hashed secret
-        // twoFactorSecret: hashedSecret,
-        // twoFactorEnabled: true
-      }
+    await User.findByIdAndUpdate(session.user.id, {
+      twoFactorEnabled: true
     })
 
     return NextResponse.json({ 

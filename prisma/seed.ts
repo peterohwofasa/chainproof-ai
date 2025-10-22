@@ -89,6 +89,7 @@ async function main() {
         id: 'user_1',
         email: 'alice@chainproof.ai',
         name: 'Alice Johnson',
+        password: hashedPassword,
         walletAddress: '0x742d35Cc6634C0532925a3b8D4C0C8b3C2e1e1e1',
         emailVerified: true,
         lastLoginAt: new Date('2024-03-15'),

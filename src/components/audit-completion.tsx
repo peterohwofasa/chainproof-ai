@@ -13,7 +13,27 @@ interface AuditCompletionProps {
 
 export function AuditCompletion({ auditId, onClose }: AuditCompletionProps) {
   const router = useRouter()
-  const [countdown, setCountdown] = useState(10)
+  const [countdown, setCountdown] = useState(15) // Increased countdown time
+  const [auditData, setAuditData] = useState<any>(null)
+
+  // Fetch audit data to show summary
+  useEffect(() => {
+    const fetchAuditData = async () => {
+      try {
+        const response = await fetch(`/api/audits/${auditId}`)
+        if (response.ok) {
+          const data = await response.json()
+          setAuditData(data.audit)
+        }
+      } catch (error) {
+        console.error('Failed to fetch audit data:', error)
+      }
+    }
+    
+    if (auditId) {
+      fetchAuditData()
+    }
+  }, [auditId])
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -53,6 +73,37 @@ export function AuditCompletion({ auditId, onClose }: AuditCompletionProps) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Audit Summary */}
+          {auditData && (
+            <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-2">
+              <h4 className="font-medium text-sm text-gray-700 dark:text-gray-300">Audit Summary</h4>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <span className="text-gray-500">Contract:</span>
+                  <div className="font-medium truncate">{auditData.contract?.name || 'Smart Contract'}</div>
+                </div>
+                <div>
+                  <span className="text-gray-500">Overall Score:</span>
+                  <div className="font-medium text-green-600">{auditData.overallScore || 'N/A'}/100</div>
+                </div>
+                <div>
+                  <span className="text-gray-500">Risk Level:</span>
+                  <div className={`font-medium ${
+                    auditData.riskLevel === 'LOW' ? 'text-green-600' :
+                    auditData.riskLevel === 'MEDIUM' ? 'text-yellow-600' :
+                    auditData.riskLevel === 'HIGH' ? 'text-red-600' : 'text-gray-600'
+                  }`}>
+                    {auditData.riskLevel || 'N/A'}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-gray-500">Vulnerabilities:</span>
+                  <div className="font-medium">{auditData.vulnerabilities?.length || 0} found</div>
+                </div>
+              </div>
+            </div>
+          )}
+          
           <div className="text-center text-sm text-gray-600 dark:text-gray-400">
             Automatically redirecting to dashboard in {countdown} seconds...
           </div>

@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db } from '@/lib/db'
+import connectDB from '@/lib/mongodb'
+import { Subscription } from '@/models'
 
 export async function POST(request: NextRequest) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -25,12 +28,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate user has enterprise permissions
-    const userSubscription = await db.subscription.findFirst({
-      where: { userId: session.user.id },
-      select: { plan: true }
-    })
+    const userSubscription = await Subscription.findOne(
+      { userId: session.user.id },
+      { plan: 1 }
+    ).lean()
 
-    if (userSubscription?.plan !== 'ENTERPRISE') {
+    if ((userSubscription as any)?.plan !== 'ENTERPRISE') {
       return NextResponse.json(
         { error: 'SSO is only available for enterprise plans' },
         { status: 403 }

@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withErrorHandler } from '@/lib/error-handler';
 import { logger } from '@/lib/logger';
-import { db } from '@/lib/db';
+import { connectDB } from '@/models';
 import { config } from '@/lib/config';
 import { databaseBackup } from '@/lib/backup';
 import { rateLimiter } from '@/lib/rate-limiter';
 import { redisClient } from '@/lib/redis';
 import { healthCheckService } from '@/lib/health-check';
+import mongoose from 'mongoose';
 
 interface HealthCheck {
   status: 'healthy' | 'degraded' | 'unhealthy';
@@ -54,7 +55,9 @@ const startTime = Date.now();
 async function checkDatabaseHealth(): Promise<ServiceStatus> {
   const start = Date.now();
   try {
-    await db.$queryRaw`SELECT 1`;
+    await connectDB();
+    // Simple ping to check MongoDB connection
+    await mongoose.connection.db.admin().ping();
     return {
       status: 'healthy',
       responseTime: Date.now() - start,

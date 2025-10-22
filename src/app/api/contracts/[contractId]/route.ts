@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db as prisma } from '@/lib/db'
+import { connectDB } from '@/lib/mongodb'
+import { Contract, Project, Audit } from '@/models'
 import { z } from 'zod'
 
 const updateContractSchema = z.object({
@@ -20,80 +21,19 @@ export async function GET(
   { params }: { params: { contractId: string } }
 ) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const contract = await prisma.contract.findUnique({
-      where: {
-        id: params.contractId,
-      },
-      select: {
-        id: true,
-        address: true,
-        name: true,
-        sourceCode: true,
-        bytecode: true,
-        abi: true,
-        compilerVersion: true,
-        optimizationEnabled: true,
-        projectId: true,
-        createdAt: true,
-        updatedAt: true,
-        project: {
-          select: {
-            id: true,
-            name: true,
-            description: true,
-            userId: true,
-          },
-        },
-        audits: {
-          select: {
-            id: true,
-            status: true,
-            auditType: true,
-            overallScore: true,
-            riskLevel: true,
-            auditDuration: true,
-            cost: true,
-            startedAt: true,
-            completedAt: true,
-            errorMessage: true,
-            createdAt: true,
-            vulnerabilities: {
-              select: {
-                id: true,
-                title: true,
-                severity: true,
-                category: true,
-                description: true,
-                recommendation: true,
-                lineNumbers: true,
-                codeSnippet: true,
-              },
-              orderBy: {
-                severity: 'desc',
-              },
-            },
-            _count: {
-              select: {
-                vulnerabilities: true,
-              },
-            },
-          },
-          orderBy: {
-            createdAt: 'desc',
-          },
-        },
-        _count: {
-          select: {
-            audits: true,
-          },
-        },
-      },
-    })
+    const contract = await Contract.findById(params.contractId)
+      .populate({
+        path: 'project',
+        select: 'id name description userId',
+      })
+      .lean()
 
     if (!contract) {
       return NextResponse.json(
@@ -110,7 +50,44 @@ export async function GET(
       )
     }
 
-    return NextResponse.json(contract)
+    // Get audits for this contract
+    const audits = await Audit.find({ contractId: params.contractId })
+      .populate({
+        path: 'vulnerabilities',
+        select: 'id title severity category description recommendation lineNumbers codeSnippet',
+        options: { sort: { severity: -1 } }
+      })
+      .select('id status auditType overallScore riskLevel auditDuration cost startedAt completedAt errorMessage createdAt vulnerabilities')
+      .sort({ createdAt: -1 })
+      .lean()
+
+    // Count total audits
+    const auditCount = await Audit.countDocuments({ contractId: params.contractId })
+
+    // Format response to match Prisma structure
+    const response = {
+      ...contract,
+      id: contract._id.toString(),
+      audits: audits.map(audit => ({
+        ...audit,
+        id: audit._id.toString(),
+        vulnerabilities: audit.vulnerabilities?.map((vuln: any) => ({
+          ...vuln,
+          id: vuln._id.toString(),
+        })) || [],
+        _count: {
+          vulnerabilities: audit.vulnerabilities?.length || 0,
+        },
+      })),
+      _count: {
+        audits: auditCount,
+      },
+    }
+
+    // Remove MongoDB _id field
+    delete response._id
+
+    return NextResponse.json(response)
   } catch (error) {
     console.error('Error fetching contract:', error)
     return NextResponse.json(
@@ -133,19 +110,15 @@ export async function PUT(
     const body = await request.json()
     const validatedData = updateContractSchema.parse(body)
 
+    await connectDB()
+
     // Check if contract exists and user has access
-    const existingContract = await prisma.contract.findUnique({
-      where: {
-        id: params.contractId,
-      },
-      include: {
-        project: {
-          select: {
-            userId: true,
-          },
-        },
-      },
-    })
+    const existingContract = await Contract.findById(params.contractId)
+      .populate({
+        path: 'project',
+        select: 'userId',
+      })
+      .lean()
 
     if (!existingContract) {
       return NextResponse.json(
@@ -163,11 +136,9 @@ export async function PUT(
 
     // Verify project access if projectId is being changed
     if (validatedData.projectId && validatedData.projectId !== existingContract.projectId) {
-      const project = await prisma.project.findFirst({
-        where: {
-          id: validatedData.projectId,
-          userId: session.user.id,
-        },
+      const project = await Project.findOne({
+        _id: validatedData.projectId,
+        userId: session.user.id,
       })
 
       if (!project) {
@@ -178,27 +149,33 @@ export async function PUT(
       }
     }
 
-    const contract = await prisma.contract.update({
-      where: {
-        id: params.contractId,
-      },
-      data: validatedData,
-      include: {
-        project: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        _count: {
-          select: {
-            audits: true,
-          },
-        },
-      },
-    })
+    const contract = await Contract.findByIdAndUpdate(
+      params.contractId,
+      validatedData,
+      { new: true }
+    )
+      .populate({
+        path: 'project',
+        select: 'id name',
+      })
+      .lean()
 
-    return NextResponse.json(contract)
+    // Count audits for this contract
+    const auditCount = await Audit.countDocuments({ contractId: params.contractId })
+
+    // Format response to match Prisma structure
+    const response = {
+      ...contract,
+      id: contract._id.toString(),
+      _count: {
+        audits: auditCount,
+      },
+    }
+
+    // Remove MongoDB _id field
+    delete response._id
+
+    return NextResponse.json(response)
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
@@ -225,24 +202,15 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    await connectDB()
+
     // Check if contract exists and user has access
-    const existingContract = await prisma.contract.findUnique({
-      where: {
-        id: params.contractId,
-      },
-      include: {
-        project: {
-          select: {
-            userId: true,
-          },
-        },
-        _count: {
-          select: {
-            audits: true,
-          },
-        },
-      },
-    })
+    const existingContract = await Contract.findById(params.contractId)
+      .populate({
+        path: 'project',
+        select: 'userId',
+      })
+      .lean()
 
     if (!existingContract) {
       return NextResponse.json(
@@ -250,6 +218,9 @@ export async function DELETE(
         { status: 404 }
       )
     }
+
+    // Count audits for this contract
+    const auditCount = await Audit.countDocuments({ contractId: params.contractId })
 
     if (existingContract.project && existingContract.project.userId !== session.user.id) {
       return NextResponse.json(
@@ -259,23 +230,19 @@ export async function DELETE(
     }
 
     // Check if contract has audits
-    if (existingContract._count.audits > 0) {
+    if (auditCount > 0) {
       return NextResponse.json(
         { 
           error: 'Cannot delete contract with existing audits',
           details: {
-            audits: existingContract._count.audits,
+            audits: auditCount,
           },
         },
         { status: 400 }
       )
     }
 
-    await prisma.contract.delete({
-      where: {
-        id: params.contractId,
-      },
-    })
+    await Contract.findByIdAndDelete(params.contractId)
 
     return NextResponse.json({ message: 'Contract deleted successfully' })
   } catch (error) {

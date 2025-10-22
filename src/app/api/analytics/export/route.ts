@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db } from '@/lib/db'
+import { connectDB, Audit, User, Contract, Vulnerability } from '@/models'
 
 export async function GET(request: NextRequest) {
   try {
@@ -38,44 +38,94 @@ export async function GET(request: NextRequest) {
         startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
     }
 
-    // Fetch detailed analytics data
-    const audits = await db.audit.findMany({
-      where: {
-        createdAt: {
-          gte: startDate
+    // Connect to MongoDB
+    await connectDB()
+
+    // Fetch detailed analytics data using aggregation
+    const audits = await Audit.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: startDate }
         }
       },
-      select: {
-        id: true,
-        status: true,
-        overallScore: true,
-        riskLevel: true,
-        createdAt: true,
-        completedAt: true,
-        auditDuration: true,
-        user: {
-          select: {
-            name: true,
-            email: true
-          }
-        },
-        contract: {
-          select: {
-            name: true
-          }
-        },
-        vulnerabilities: {
-          select: {
-            severity: true,
-            category: true,
-            title: true
-          }
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'userId',
+          foreignField: '_id',
+          as: 'user',
+          pipeline: [
+            {
+              $project: {
+                name: 1,
+                email: 1
+              }
+            }
+          ]
         }
       },
-      orderBy: {
-        createdAt: 'desc'
+      {
+        $lookup: {
+          from: 'contracts',
+          localField: 'contractId',
+          foreignField: '_id',
+          as: 'contract',
+          pipeline: [
+            {
+              $project: {
+                name: 1
+              }
+            }
+          ]
+        }
+      },
+      {
+        $lookup: {
+          from: 'vulnerabilities',
+          localField: '_id',
+          foreignField: 'auditId',
+          as: 'vulnerabilities',
+          pipeline: [
+            {
+              $project: {
+                severity: 1,
+                category: 1,
+                title: 1
+              }
+            }
+          ]
+        }
+      },
+      {
+        $unwind: {
+          path: '$user',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $unwind: {
+          path: '$contract',
+          preserveNullAndEmptyArrays: true
+        }
+      },
+      {
+        $project: {
+          _id: 1,
+          status: 1,
+          overallScore: 1,
+          riskLevel: 1,
+          createdAt: 1,
+          completedAt: 1,
+          auditDuration: 1,
+          user: 1,
+          contract: 1,
+          vulnerabilities: 1
+        }
+      },
+      {
+        $sort: { createdAt: -1 }
       }
-    })
+    ])
 
     // Generate CSV data
     const headers = [
@@ -95,15 +145,15 @@ export async function GET(request: NextRequest) {
     ]
 
     const csvData = audits.map(audit => {
-      const criticalCount = audit.vulnerabilities.filter(v => v.severity === 'CRITICAL').length
-      const highCount = audit.vulnerabilities.filter(v => v.severity === 'HIGH').length
-      const mediumCount = audit.vulnerabilities.filter(v => v.severity === 'MEDIUM').length
-      const lowCount = audit.vulnerabilities.filter(v => v.severity === 'LOW').length
+      const criticalCount = audit.vulnerabilities.filter((v: any) => v.severity === 'CRITICAL').length
+      const highCount = audit.vulnerabilities.filter((v: any) => v.severity === 'HIGH').length
+      const mediumCount = audit.vulnerabilities.filter((v: any) => v.severity === 'MEDIUM').length
+      const lowCount = audit.vulnerabilities.filter((v: any) => v.severity === 'LOW').length
 
       return [
-        audit.id,
-        audit.contract.name,
-        audit.user.email,
+        audit._id.toString(),
+        audit.contract?.name || '',
+        audit.user?.email || '',
         audit.status,
         audit.overallScore || '',
         audit.riskLevel || '',

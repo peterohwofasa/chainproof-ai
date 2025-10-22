@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 
 // Force dynamic rendering to prevent static generation issues
 export const dynamic = 'force-dynamic'
@@ -12,20 +13,73 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import { Shield, Mail, Lock, Eye, EyeOff } from 'lucide-react'
+import { Shield, Mail, Lock, Eye, EyeOff, Wallet, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { DynamicBaseSignInButton, DynamicCDPSignInButton } from '@/components/dynamic-cdp-components'
+import { signInWithBase } from '@/lib/base-account'
 
-export default function LoginPage() {
+function LoginPageContent() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [isBaseLoading, setIsBaseLoading] = useState(false)
   const [error, setError] = useState('')
   const [showVerification, setShowVerification] = useState(false)
   const [verificationToken, setVerificationToken] = useState('')
   const [isVerifying, setIsVerifying] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
+
+  // Handle Base provider authentication
+  useEffect(() => {
+    const provider = searchParams.get('provider')
+    if (provider === 'base' && !isBaseLoading) {
+      handleBaseSignIn()
+    }
+  }, [searchParams])
+
+  const handleBaseSignIn = async () => {
+    setIsBaseLoading(true)
+    setError('')
+
+    try {
+      // Connect to Base wallet
+      const walletAddress = await signInWithBase()
+      
+      if (!walletAddress) {
+        throw new Error('Failed to connect to Base wallet')
+      }
+
+      // Sign in with NextAuth using the Base account
+      const result = await signIn('base-account', {
+        address: walletAddress,
+        redirect: false,
+        callbackUrl: '/dashboard'
+      })
+
+      if (result?.error) {
+        throw new Error(result.error)
+      }
+
+      if (result?.ok) {
+        toast.success(`Successfully signed in with Base account ${walletAddress.slice(0, 6)}...${walletAddress.slice(-4)}`)
+        router.push('/dashboard')
+      }
+
+    } catch (error) {
+      console.error('Base sign-in error:', error)
+      let errorMessage = 'Failed to connect to Base Account'
+      
+      if (error instanceof Error) {
+        errorMessage = error.message
+      }
+      
+      setError(errorMessage)
+      toast.error(`Base sign-in failed: ${errorMessage}`)
+    } finally {
+      setIsBaseLoading(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -236,10 +290,7 @@ export default function LoginPage() {
             >
               {isLoading ? 'Signing in...' : 'Sign In'}
             </Button>
-          </form>
-          )}
 
-          <div className="mt-6">
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
                 <span className="w-full border-t" />
@@ -251,28 +302,29 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <div className="mt-6 space-y-3">
-              <DynamicBaseSignInButton 
-                className="w-full"
-                onSuccess={() => {
-                  toast.success('Successfully connected with Base!')
-                }}
-                onError={(error) => {
-                  toast.error(`Base connection failed: ${error}`)
-                }}
-              />
-              
-              <DynamicCDPSignInButton 
-                className="w-full"
-                onSuccess={() => {
-                  toast.success('Successfully connected with CDP!')
-                }}
-                onError={(error) => {
-                  toast.error(`CDP connection failed: ${error}`)
-                }}
-              />
-            </div>
-          </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              disabled={isBaseLoading}
+              onClick={handleBaseSignIn}
+            >
+              {isBaseLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <Wallet className="mr-2 h-4 w-4" />
+                  Sign in with Base
+                </>
+              )}
+            </Button>
+          </form>
+          )}
+
+
 
           <div className="mt-6 text-center text-sm">
             <span className="text-gray-600 dark:text-gray-400">
@@ -285,5 +337,13 @@ export default function LoginPage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+      <LoginPageContent />
+    </Suspense>
   )
 }

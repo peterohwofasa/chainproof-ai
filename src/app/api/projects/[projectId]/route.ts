@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db as prisma } from '@/lib/db'
+import { connectDB } from '@/lib/mongodb'
+import { Project, Team, TeamMember, Contract, Audit, Vulnerability } from '@/models'
 import { z } from 'zod'
 
 const updateProjectSchema = z.object({
@@ -15,71 +16,22 @@ export async function GET(
   { params }: { params: { projectId: string } }
 ) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const project = await prisma.project.findFirst({
-      where: {
-        id: params.projectId,
-        userId: session.user.id,
-      },
-      include: {
-        team: {
-          select: {
-            id: true,
-            name: true,
-            description: true,
-          },
-        },
-        contracts: {
-          include: {
-            audits: {
-              select: {
-                id: true,
-                status: true,
-                overallScore: true,
-                riskLevel: true,
-                createdAt: true,
-                completedAt: true,
-              },
-              orderBy: {
-                createdAt: 'desc',
-              },
-            },
-          },
-        },
-        audits: {
-          include: {
-            contract: {
-              select: {
-                id: true,
-                name: true,
-                address: true,
-              },
-            },
-            vulnerabilities: {
-              select: {
-                id: true,
-                title: true,
-                severity: true,
-                category: true,
-              },
-            },
-          },
-          orderBy: {
-            createdAt: 'desc',
-          },
-        },
-        _count: {
-          select: {
-            contracts: true,
-            audits: true,
-          },
-        },
-      },
+    const project = await Project.findOne({
+      _id: params.projectId,
+      userId: session.user.id,
     })
+      .populate({
+        path: 'team',
+        select: 'id name description',
+      })
+      .lean()
 
     if (!project) {
       return NextResponse.json(
@@ -88,7 +40,82 @@ export async function GET(
       )
     }
 
-    return NextResponse.json(project)
+    // Get contracts for this project
+    const contracts = await Contract.find({ projectId: params.projectId }).lean()
+
+    // Get audits for each contract
+    const contractsWithAudits = await Promise.all(
+      contracts.map(async (contract) => {
+        const audits = await Audit.find({ contractId: contract._id.toString() })
+          .select('id status overallScore riskLevel createdAt completedAt')
+          .sort({ createdAt: -1 })
+          .lean()
+
+        return {
+          ...contract,
+          id: contract._id.toString(),
+          audits: audits.map(audit => ({
+            ...audit,
+            id: audit._id.toString(),
+          })),
+        }
+      })
+    )
+
+    // Get direct audits for this project
+    const audits = await Audit.find({ projectId: params.projectId })
+      .populate({
+        path: 'contract',
+        select: 'id name address',
+      })
+      .populate({
+        path: 'vulnerabilities',
+        select: 'id title severity category',
+      })
+      .sort({ createdAt: -1 })
+      .lean()
+
+    // Count contracts and audits
+    const contractCount = await Contract.countDocuments({ projectId: params.projectId })
+    const auditCount = await Audit.countDocuments({ projectId: params.projectId })
+
+    // Format response to match Prisma structure
+    const response = {
+      ...project,
+      id: project._id.toString(),
+      team: project.team ? {
+        ...project.team,
+        id: project.team._id.toString(),
+      } : null,
+      contracts: contractsWithAudits.map(contract => {
+        delete contract._id
+        return contract
+      }),
+      audits: audits.map(audit => ({
+        ...audit,
+        id: audit._id.toString(),
+        contract: audit.contract ? {
+          ...audit.contract,
+          id: audit.contract._id.toString(),
+        } : null,
+        vulnerabilities: audit.vulnerabilities?.map((vuln: any) => ({
+          ...vuln,
+          id: vuln._id.toString(),
+        })) || [],
+      })),
+      _count: {
+        contracts: contractCount,
+        audits: auditCount,
+      },
+    }
+
+    // Remove MongoDB _id fields
+    delete response._id
+    if (response.team) {
+      delete response.team._id
+    }
+
+    return NextResponse.json(response)
   } catch (error) {
     console.error('Error fetching project:', error)
     return NextResponse.json(
@@ -103,6 +130,8 @@ export async function PUT(
   { params }: { params: { projectId: string } }
 ) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -112,12 +141,10 @@ export async function PUT(
     const validatedData = updateProjectSchema.parse(body)
 
     // Check if project exists and user has access
-    const existingProject = await prisma.project.findFirst({
-      where: {
-        id: params.projectId,
-        userId: session.user.id,
-      },
-    })
+    const existingProject = await Project.findOne({
+      _id: params.projectId,
+      userId: session.user.id,
+    }).lean()
 
     if (!existingProject) {
       return NextResponse.json(
@@ -128,12 +155,10 @@ export async function PUT(
 
     // Verify team access if teamId is being changed
     if (validatedData.teamId && validatedData.teamId !== existingProject.teamId) {
-      const teamMember = await prisma.teamMember.findFirst({
-        where: {
-          teamId: validatedData.teamId,
-          userId: session.user.id,
-        },
-      })
+      const teamMember = await TeamMember.findOne({
+        teamId: validatedData.teamId,
+        userId: session.user.id,
+      }).lean()
 
       if (!teamMember) {
         return NextResponse.json(
@@ -143,28 +168,42 @@ export async function PUT(
       }
     }
 
-    const project = await prisma.project.update({
-      where: {
-        id: params.projectId,
-      },
-      data: validatedData,
-      include: {
-        team: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-        _count: {
-          select: {
-            contracts: true,
-            audits: true,
-          },
-        },
-      },
-    })
+    const project = await Project.findByIdAndUpdate(
+      params.projectId,
+      validatedData,
+      { new: true }
+    )
+      .populate({
+        path: 'team',
+        select: 'id name',
+      })
+      .lean()
 
-    return NextResponse.json(project)
+    // Count contracts and audits
+    const contractCount = await Contract.countDocuments({ projectId: params.projectId })
+    const auditCount = await Audit.countDocuments({ projectId: params.projectId })
+
+    // Format response to match Prisma structure
+    const response = {
+      ...project,
+      id: project._id.toString(),
+      team: project.team ? {
+        ...project.team,
+        id: project.team._id.toString(),
+      } : null,
+      _count: {
+        contracts: contractCount,
+        audits: auditCount,
+      },
+    }
+
+    // Remove MongoDB _id fields
+    delete response._id
+    if (response.team) {
+      delete response.team._id
+    }
+
+    return NextResponse.json(response)
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
@@ -186,26 +225,18 @@ export async function DELETE(
   { params }: { params: { projectId: string } }
 ) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     // Check if project exists and user has access
-    const existingProject = await prisma.project.findFirst({
-      where: {
-        id: params.projectId,
-        userId: session.user.id,
-      },
-      include: {
-        _count: {
-          select: {
-            contracts: true,
-            audits: true,
-          },
-        },
-      },
-    })
+    const existingProject = await Project.findOne({
+      _id: params.projectId,
+      userId: session.user.id,
+    }).lean()
 
     if (!existingProject) {
       return NextResponse.json(
@@ -214,25 +245,25 @@ export async function DELETE(
       )
     }
 
+    // Count contracts and audits
+    const contractCount = await Contract.countDocuments({ projectId: params.projectId })
+    const auditCount = await Audit.countDocuments({ projectId: params.projectId })
+
     // Check if project has contracts or audits
-    if (existingProject._count.contracts > 0 || existingProject._count.audits > 0) {
+    if (contractCount > 0 || auditCount > 0) {
       return NextResponse.json(
         { 
           error: 'Cannot delete project with existing contracts or audits',
           details: {
-            contracts: existingProject._count.contracts,
-            audits: existingProject._count.audits,
+            contracts: contractCount,
+            audits: auditCount,
           },
         },
         { status: 400 }
       )
     }
 
-    await prisma.project.delete({
-      where: {
-        id: params.projectId,
-      },
-    })
+    await Project.findByIdAndDelete(params.projectId)
 
     return NextResponse.json({ message: 'Project deleted successfully' })
   } catch (error) {

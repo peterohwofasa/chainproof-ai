@@ -1,18 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '../../../../lib/db'
+import connectDB from '../../../../lib/mongodb'
+import { Subscription, SubscriptionPlan } from '@/models'
 
 export async function POST(request: NextRequest) {
   try {
+    await connectDB()
+    
     // Get all existing users with FREE plan who don't have free trial set up
-    const subscriptionsToUpdate = await db.subscription.findMany({
-      where: {
-        plan: 'FREE',
-        isFreeTrial: false,
-        creditsRemaining: {
-          lte: 5 // Users with 5 or fewer credits (original free tier)
-        }
-      } as any
-    })
+    const subscriptionsToUpdate = await Subscription.find({
+      plan: SubscriptionPlan.FREE,
+      isFreeTrial: false,
+      creditsRemaining: { $lte: 5 } // Users with 5 or fewer credits (original free tier)
+    }).lean()
 
     console.log(`Found ${subscriptionsToUpdate.length} subscriptions to migrate to free trial`)
 
@@ -22,14 +21,11 @@ export async function POST(request: NextRequest) {
     freeTrialEnds.setDate(freeTrialStarted.getDate() + 7)
 
     const updatePromises = subscriptionsToUpdate.map(subscription => 
-      db.subscription.update({
-        where: { id: subscription.id },
-        data: {
-          isFreeTrial: true,
-          freeTrialStarted,
-          freeTrialEnds,
-          creditsRemaining: 999, // Give generous credits during trial
-        } as any
+      Subscription.findByIdAndUpdate(subscription._id, {
+        isFreeTrial: true,
+        freeTrialStarted,
+        freeTrialEnds,
+        creditsRemaining: 999, // Give generous credits during trial
       })
     )
 

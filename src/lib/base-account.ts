@@ -103,28 +103,7 @@ export async function signInWithBase(): Promise<string> {
   }
 
   try {
-    // Wait for the SDK to load if it's not available yet
-    let retries = 0;
-    const maxRetries = 10;
-    while (!(window as any).createBaseAccountSDK && retries < maxRetries) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      retries++;
-    }
-
-    // Try using the global window.createBaseAccountSDK if available
-    if ((window as any).createBaseAccountSDK) {
-      const sdk = (window as any).createBaseAccountSDK(baseAccountConfig);
-      const provider = sdk.getProvider();
-      
-      if (provider) {
-        const accounts = await provider.request({ method: 'eth_requestAccounts' });
-        if (accounts && accounts.length > 0) {
-          return accounts[0];
-        }
-      }
-    }
-
-    // Fallback to our SDK instance
+    // Use our locally installed SDK instance
     const sdk = getBaseAccountSDK()
     if (!sdk) {
       throw new Error('Base Account SDK not initialized')

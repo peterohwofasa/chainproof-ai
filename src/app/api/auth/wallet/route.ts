@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { connectDB, User, Subscription, SubscriptionPlan, SubscriptionStatus } from '@/models'
 import { AuthService, AuthError, createAuthResponse } from '@/lib/auth'
 import { SecurityUtils } from '@/lib/security'
 import { z } from 'zod'
@@ -12,6 +12,8 @@ const walletAuthSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    await connectDB()
+    
     const body = await request.json()
     
     // Validate input
@@ -25,58 +27,35 @@ export async function POST(request: NextRequest) {
     }
 
     // Find or create user
-    let user = await db.user.findUnique({
-      where: { walletAddress: address },
-      include: {
-        subscriptions: true,
-      },
-    })
+    let user = await User.findOne({ walletAddress: address })
 
     if (!user) {
       // Create new user with wallet
-      user = await db.user.create({
-        data: {
-          email: `${address.toLowerCase()}@wallet.chainproof.ai`, // Placeholder email
-          walletAddress: address,
-          name: `Wallet ${address.slice(0, 6)}...${address.slice(-4)}`,
-        },
-        include: {
-          subscriptions: true,
-        },
+      user = await User.create({
+        email: `${address.toLowerCase()}@wallet.chainproof.ai`, // Placeholder email
+        walletAddress: address,
+        name: `Wallet ${address.slice(0, 6)}...${address.slice(-4)}`,
       })
 
       // Create default subscription
-      await db.subscription.create({
-        data: {
-          userId: user.id,
-          plan: 'FREE',
-          status: 'ACTIVE',
-          creditsRemaining: 3,
-        },
+      await Subscription.create({
+        userId: user._id.toString(),
+        plan: SubscriptionPlan.FREE,
+        status: SubscriptionStatus.ACTIVE,
+        creditsRemaining: 3,
       })
-
-      // Refetch user with subscription
-      const updatedUser = await db.user.findUnique({
-        where: { id: user.id },
-        include: {
-          subscriptions: true,
-        },
-      })
-      
-      if (!updatedUser) {
-        return NextResponse.json(
-          { error: 'User not found after creation' },
-          { status: 500 }
-        )
-      }
-      
-      user = updatedUser
     }
+
+    // Get user's subscription
+    const subscription = await Subscription.findOne({
+      userId: user._id.toString(),
+      status: SubscriptionStatus.ACTIVE
+    }).sort({ createdAt: -1 })
 
     // Create auth response
     const token = SecurityUtils.generateSecureToken(64)
     const response = createAuthResponse({
-      id: user.id,
+      id: user._id.toString(),
       email: user.email,
       name: user.name,
       walletAddress: user.walletAddress || undefined,

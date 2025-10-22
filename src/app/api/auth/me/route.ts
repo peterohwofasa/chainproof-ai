@@ -1,41 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import connectDB from '@/lib/mongodb'
+import { User, Subscription, Audit } from '@/models'
 import { requireAuth } from '@/lib/auth'
 
 export async function GET(request: NextRequest) {
   try {
+    // Connect to MongoDB
+    await connectDB()
+    
     const authUser = await requireAuth(request)
 
-    const user = await db.user.findUnique({
-      where: { id: authUser.userId },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        walletAddress: true,
-        createdAt: true,
-        subscriptions: {
-          select: {
-            id: true,
-            plan: true,
-            status: true,
-            creditsRemaining: true,
-            createdAt: true,
-            isFreeTrial: true,
-            freeTrialStarted: true,
-            freeTrialEnds: true
-          },
-          where: { status: 'ACTIVE' },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-        },
-        _count: {
-          select: {
-            audits: true,
-          },
-        },
-      },
-    })
+    const user = await User.findById(authUser.userId).select(
+      'email name walletAddress createdAt'
+    )
 
     if (!user) {
       return NextResponse.json(
@@ -44,16 +21,35 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    // Get active subscription
+    const subscription = await Subscription.findOne({
+      userId: authUser.userId,
+      status: 'ACTIVE'
+    }).select('plan status creditsRemaining createdAt isFreeTrial freeTrialStarted freeTrialEnds')
+      .sort({ createdAt: -1 })
+
+    // Count audits
+    const auditCount = await Audit.countDocuments({ userId: authUser.userId })
+
     return NextResponse.json({
       success: true,
       user: {
-        id: user.id,
+        id: user._id.toString(),
         email: user.email,
         name: user.name,
         walletAddress: user.walletAddress,
         createdAt: user.createdAt,
-        subscription: user.subscriptions[0] || null,
-        auditCount: user._count.audits,
+        subscription: subscription ? {
+          id: subscription._id.toString(),
+          plan: subscription.plan,
+          status: subscription.status,
+          creditsRemaining: subscription.creditsRemaining,
+          createdAt: subscription.createdAt,
+          isFreeTrial: subscription.isFreeTrial,
+          freeTrialStarted: subscription.freeTrialStarted,
+          freeTrialEnds: subscription.freeTrialEnds
+        } : null,
+        auditCount,
       },
     })
   } catch (error) {

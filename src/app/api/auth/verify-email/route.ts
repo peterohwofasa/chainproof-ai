@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { connectDB, User } from '@/models'
 import { SecurityUtils } from '@/lib/security'
 import { logger } from '@/lib/logger'
 import { withErrorHandler, ValidationError } from '@/lib/error-handler'
@@ -9,6 +9,8 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   // Rate limiting
   const rateLimitResponse = await withRateLimit(request, 'email-verification', 5, 60000) // 5 requests per minute
   if (rateLimitResponse) return rateLimitResponse
+
+  await connectDB()
 
   // Parse request body
   let body
@@ -25,45 +27,41 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   }
 
   // Find user with verification token
-  const user = await db.user.findFirst({
-    where: {
-      emailVerificationToken: token,
-      emailVerified: false
-    }
-  })
+  const user = await User.findOne({
+    emailVerificationToken: token,
+    emailVerified: false
+  }).select({
+    _id: 1,
+    email: 1,
+    createdAt: 1
+  }).lean()
 
   if (!user) {
     throw new ValidationError('Invalid or expired verification token')
   }
 
   // Check if token is expired (24 hours)
-  const tokenAge = Date.now() - user.createdAt.getTime()
+  const tokenAge = Date.now() - (user as any).createdAt.getTime()
   const maxAge = 24 * 60 * 60 * 1000 // 24 hours
   
   if (tokenAge > maxAge) {
     // Clear expired token
-    await db.user.update({
-      where: { id: user.id },
-      data: {
-        emailVerificationToken: null
-      }
+    await User.findByIdAndUpdate((user as any)._id, {
+      emailVerificationToken: null
     })
     
     throw new ValidationError('Verification token has expired')
   }
 
   // Verify email
-  await db.user.update({
-    where: { id: user.id },
-    data: {
-      emailVerified: true,
-      emailVerificationToken: null
-    }
+  await User.findByIdAndUpdate((user as any)._id, {
+    emailVerified: true,
+    emailVerificationToken: null
   })
 
   logger.info('Email verified successfully', {
-    userId: user.id,
-    email: user.email
+    userId: (user as any)._id.toString(),
+    email: (user as any).email
   })
 
   return NextResponse.json({
@@ -77,6 +75,8 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
   const rateLimitResponse = await withRateLimit(request, 'email-verification', 3, 60000) // 3 requests per minute
   if (rateLimitResponse) return rateLimitResponse
 
+  await connectDB()
+
   const { searchParams } = new URL(request.url)
   const token = searchParams.get('token')
 
@@ -85,12 +85,14 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
   }
 
   // Find user with verification token
-  const user = await db.user.findFirst({
-    where: {
-      emailVerificationToken: token,
-      emailVerified: false
-    }
-  })
+  const user = await User.findOne({
+    emailVerificationToken: token,
+    emailVerified: false
+  }).select({
+    _id: 1,
+    email: 1,
+    createdAt: 1
+  }).lean()
 
   if (!user) {
     throw new ValidationError('Invalid or expired verification token')
@@ -102,27 +104,21 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
   
   if (tokenAge > maxAge) {
     // Clear expired token
-    await db.user.update({
-      where: { id: user.id },
-      data: {
-        emailVerificationToken: null
-      }
+    await User.findByIdAndUpdate(user._id, {
+      emailVerificationToken: null
     })
     
     throw new ValidationError('Verification token has expired')
   }
 
   // Verify email
-  await db.user.update({
-    where: { id: user.id },
-    data: {
-      emailVerified: true,
-      emailVerificationToken: null
-    }
+  await User.findByIdAndUpdate(user._id, {
+    emailVerified: true,
+    emailVerificationToken: null
   })
 
   logger.info('Email verified successfully', {
-    userId: user.id,
+    userId: user._id.toString(),
     email: user.email
   })
 

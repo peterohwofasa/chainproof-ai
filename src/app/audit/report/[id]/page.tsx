@@ -22,7 +22,21 @@ import {
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import Link from 'next/link'
 
-// Mock data for demonstration - in real app, this would come from API
+// Fetch real audit data from API
+async function fetchAuditData(id: string) {
+  try {
+    const response = await fetch(`/api/audits/${id}`)
+    if (!response.ok) {
+      throw new Error('Failed to fetch audit data')
+    }
+    return await response.json()
+  } catch (error) {
+    console.error('Error fetching audit data:', error)
+    return null
+  }
+}
+
+// Fallback mock data for demonstration - remove when API is fully implemented
 const mockAuditData = {
   '1': {
     id: '1',
@@ -138,13 +152,29 @@ export default function AuditReportPage() {
   const reportRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const id = params.id as string
-    // Simulate API call
-    setTimeout(() => {
-      const data = mockAuditData[id as keyof typeof mockAuditData]
-      setAuditData(data)
-      setLoading(false)
-    }, 500)
+    const fetchAuditData = async () => {
+      const id = params.id as string
+      try {
+        const response = await fetch(`/api/audits/${id}/report`)
+        if (response.ok) {
+          const data = await response.json()
+          setAuditData(data.audit)
+        } else {
+          // Fallback to mock data if API fails
+          const data = mockAuditData[id as keyof typeof mockAuditData]
+          setAuditData(data)
+        }
+      } catch (error) {
+        console.error('Error fetching audit data:', error)
+        // Fallback to mock data on error
+        const data = mockAuditData[id as keyof typeof mockAuditData]
+        setAuditData(data)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchAuditData()
   }, [params.id])
 
   const getSeverityColor = (severity: string) => {
@@ -186,7 +216,7 @@ export default function AuditReportPage() {
     const dataStr = JSON.stringify(reportData, null, 2)
     const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr)
     
-    const exportFileDefaultName = `${auditData.contractName}_audit_report.json`
+    const exportFileDefaultName = `${auditData.contractName || auditData.contract?.name || 'audit'}_report.json`
     
     const linkElement = document.createElement('a')
     linkElement.setAttribute('href', dataUri)
@@ -199,8 +229,8 @@ export default function AuditReportPage() {
     
     let textContent = `SMART CONTRACT AUDIT REPORT\n`
     textContent += `${'='.repeat(50)}\n\n`
-    textContent += `Contract Name: ${auditData.contractName}\n`
-    textContent += `Generated: ${auditData.createdAt.toLocaleDateString()}\n`
+    textContent += `Contract Name: ${auditData.contractName || auditData.contract?.name || 'Contract'}\n`
+    textContent += `Generated: ${new Date(auditData.createdAt || auditData.completedAt || Date.now()).toLocaleDateString()}\n`
     textContent += `Overall Score: ${auditData.overallScore}/100\n`
     textContent += `Risk Level: ${auditData.riskLevel}\n\n`
     
@@ -217,37 +247,122 @@ export default function AuditReportPage() {
     
     textContent += `CONTRACT CODE\n`
     textContent += `${'='.repeat(20)}\n\n`
-    textContent += auditData.contractCode
+    textContent += auditData.contractCode || auditData.contract?.sourceCode || 'Contract code not available'
     
     const blob = new Blob([textContent], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const linkElement = document.createElement('a')
     linkElement.setAttribute('href', url)
-    linkElement.setAttribute('download', `${auditData.contractName}_audit_report.txt`)
+    linkElement.setAttribute('download', `${auditData.contractName || auditData.contract?.name || 'audit'}_report.txt`)
     linkElement.click()
     URL.revokeObjectURL(url)
   }
 
   const handleExportPDF = async () => {
-    if (!auditData || !reportRef.current) return
+    if (!auditData || !reportRef.current) {
+      console.error('PDF Export Error: Missing audit data or report reference')
+      alert('Unable to export PDF. Please ensure the report is fully loaded.')
+      return
+    }
     
     setIsExporting(true)
     
+    // Create a temporary style element to override oklch colors with compatible alternatives
+    let tempStyle: HTMLStyleElement | null = null
+    
     try {
+      console.log('Starting PDF export for:', auditData.contractName || auditData.contract?.name)
+      
       // Dynamic imports to avoid SSR issues
       const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
         import('jspdf'),
         import('html2canvas')
       ])
       
+      console.log('Libraries loaded, creating CSS compatibility fixes...')
+      
+      tempStyle = document.createElement('style')
+      tempStyle.textContent = `
+        :root {
+          --background: #ffffff !important;
+          --foreground: #0a0a0a !important;
+          --card: #ffffff !important;
+          --card-foreground: #0a0a0a !important;
+          --popover: #ffffff !important;
+          --popover-foreground: #0a0a0a !important;
+          --primary: #171717 !important;
+          --primary-foreground: #fafafa !important;
+          --secondary: #f5f5f5 !important;
+          --secondary-foreground: #171717 !important;
+          --muted: #f5f5f5 !important;
+          --muted-foreground: #737373 !important;
+          --accent: #f5f5f5 !important;
+          --accent-foreground: #171717 !important;
+          --destructive: #dc2626 !important;
+          --destructive-foreground: #fafafa !important;
+          --border: #e5e5e5 !important;
+          --input: #e5e5e5 !important;
+          --ring: #737373 !important;
+        }
+        .dark {
+          --background: #0a0a0a !important;
+          --foreground: #fafafa !important;
+          --card: #171717 !important;
+          --card-foreground: #fafafa !important;
+          --popover: #171717 !important;
+          --popover-foreground: #fafafa !important;
+          --primary: #e5e5e5 !important;
+          --primary-foreground: #171717 !important;
+          --secondary: #262626 !important;
+          --secondary-foreground: #fafafa !important;
+          --muted: #262626 !important;
+          --muted-foreground: #737373 !important;
+          --accent: #262626 !important;
+          --accent-foreground: #fafafa !important;
+          --destructive: #dc2626 !important;
+          --destructive-foreground: #fafafa !important;
+          --border: rgba(255, 255, 255, 0.1) !important;
+          --input: rgba(255, 255, 255, 0.15) !important;
+          --ring: #737373 !important;
+        }
+      `
+      document.head.appendChild(tempStyle)
+      
+      console.log('CSS compatibility fixes applied, capturing element...')
+      
+      // Wait a moment for styles to be applied
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      // Improved canvas options for better rendering and CSS compatibility
       const canvas = await html2canvas(reportRef.current, {
-        scale: 2,
+        scale: 1.2,
         useCORS: true,
         allowTaint: true,
-        backgroundColor: '#ffffff'
+        backgroundColor: '#ffffff',
+        logging: false,
+        width: reportRef.current.scrollWidth,
+        height: reportRef.current.scrollHeight,
+        scrollX: 0,
+        scrollY: 0,
+        ignoreElements: (element) => {
+          // Skip elements that might cause issues
+          return element.tagName === 'SCRIPT' || element.tagName === 'NOSCRIPT'
+        },
+        onclone: (clonedDoc) => {
+          // Ensure the cloned document has our compatibility styles
+          const clonedStyle = clonedDoc.createElement('style')
+          clonedStyle.textContent = tempStyle?.textContent || ''
+          clonedDoc.head.appendChild(clonedStyle)
+        }
       })
       
-      const imgData = canvas.toDataURL('image/png')
+      console.log('Canvas created:', canvas.width, 'x', canvas.height)
+      
+      if (canvas.width === 0 || canvas.height === 0) {
+        throw new Error('Canvas has zero dimensions')
+      }
+      
+      const imgData = canvas.toDataURL('image/png', 0.95)
       const pdf = new jsPDF('p', 'mm', 'a4')
       
       const imgWidth = 210
@@ -257,9 +372,11 @@ export default function AuditReportPage() {
       
       let position = 0
       
+      // Add first page
       pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight)
       heightLeft -= pageHeight
       
+      // Add additional pages if needed
       while (heightLeft >= 0) {
         position = heightLeft - imgHeight
         pdf.addPage()
@@ -267,10 +384,28 @@ export default function AuditReportPage() {
         heightLeft -= pageHeight
       }
       
-      pdf.save(`${auditData.contractName}_audit_report.pdf`)
+      const fileName = `${auditData.contractName || auditData.contract?.name || 'audit'}_report.pdf`
+      console.log('Saving PDF as:', fileName)
+      
+      pdf.save(fileName)
+      console.log('PDF export completed successfully')
+      
+      // Clean up temporary style
+      document.head.removeChild(tempStyle)
+      
     } catch (error) {
       console.error('Error generating PDF:', error)
-      alert('Error generating PDF. Please try again.')
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred'
+      alert(`Error generating PDF: ${errorMessage}. Please try again or contact support.`)
+      
+      // Clean up temporary style in case of error
+      try {
+        if (tempStyle && tempStyle.parentNode) {
+          document.head.removeChild(tempStyle)
+        }
+      } catch (cleanupError) {
+        console.warn('Could not clean up temporary style:', cleanupError)
+      }
     } finally {
       setIsExporting(false)
     }
@@ -315,7 +450,17 @@ export default function AuditReportPage() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8" ref={reportRef}>
+    <>
+      <style jsx>{`
+        @media print {
+          .container {
+            max-width: none !important;
+            margin: 0 !important;
+            padding: 20px !important;
+          }
+        }
+      `}</style>
+      <div className="container mx-auto px-4 py-8" ref={reportRef} style={{ minHeight: '100vh', backgroundColor: '#ffffff' }}>
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-4">
@@ -327,11 +472,11 @@ export default function AuditReportPage() {
           </Button>
           <div>
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-              {auditData.contractName} - Audit Report
+              {auditData.contractName || auditData.contract?.name || 'Contract'} - Audit Report
             </h1>
             <p className="text-gray-600 dark:text-gray-300 flex items-center gap-2 mt-1">
               <Calendar className="w-4 h-4" />
-              Generated on {auditData.createdAt.toLocaleDateString()}
+              Generated on {new Date(auditData.createdAt || auditData.completedAt || Date.now()).toLocaleDateString()}
             </p>
           </div>
         </div>
@@ -489,6 +634,7 @@ export default function AuditReportPage() {
           </Card>
         ))}
       </div>
-    </div>
+      </div>
+    </>
   )
 }

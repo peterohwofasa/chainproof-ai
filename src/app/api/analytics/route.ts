@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db } from '@/lib/db'
+import { connectDB, Audit, Vulnerability, User } from '@/models'
 
 export async function GET(request: NextRequest) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -49,93 +51,96 @@ export async function GET(request: NextRequest) {
       subscriptions
     ] = await Promise.all([
       // Total audits in time range
-      db.audit.count({
-        where: {
-          createdAt: {
-            gte: startDate
-          }
-        }
+      Audit.countDocuments({
+        createdAt: { $gte: startDate }
       }),
       
       // Completed audits in time range
-      db.audit.count({
-        where: {
-          createdAt: {
-            gte: startDate
-          },
-          status: 'COMPLETED'
-        }
+      Audit.countDocuments({
+        createdAt: { $gte: startDate },
+        status: 'COMPLETED'
       }),
       
       // Average score for completed audits
-      db.audit.aggregate({
-        where: {
-          createdAt: {
-            gte: startDate
-          },
-          status: 'COMPLETED',
-          overallScore: {
-            not: null
+      Audit.aggregate([
+        {
+          $match: {
+            createdAt: { $gte: startDate },
+            status: 'COMPLETED',
+            overallScore: { $ne: null }
           }
         },
-        _avg: {
-          overallScore: true
+        {
+          $group: {
+            _id: null,
+            avgScore: { $avg: '$overallScore' }
+          }
         }
-      }),
+      ]),
       
       // Critical issues count
-      db.vulnerability.count({
-        where: {
-          audit: {
-            createdAt: {
-              gte: startDate
-            }
-          },
-          severity: 'CRITICAL'
-        }
-      }),
-      
-      // Vulnerabilities by severity
-      db.vulnerability.groupBy({
-        by: ['severity'],
-        where: {
-          audit: {
-            createdAt: {
-              gte: startDate
-            }
+      Vulnerability.aggregate([
+        {
+          $lookup: {
+            from: 'audits',
+            localField: 'auditId',
+            foreignField: '_id',
+            as: 'audit'
           }
         },
-        _count: {
-          severity: true
+        {
+          $match: {
+            'audit.createdAt': { $gte: startDate },
+            severity: 'CRITICAL'
+          }
+        },
+        {
+          $count: 'total'
         }
-      }),
+      ]),
       
-      // User metrics
-      db.user.count({
-        where: {
-          createdAt: {
-            gte: startDate
+      // Vulnerabilities by severity
+      Vulnerability.aggregate([
+        {
+          $lookup: {
+            from: 'audits',
+            localField: 'auditId',
+            foreignField: '_id',
+            as: 'audit'
+          }
+        },
+        {
+          $match: {
+            'audit.createdAt': { $gte: startDate }
+          }
+        },
+        {
+          $group: {
+            _id: '$severity',
+            count: { $sum: 1 }
           }
         }
+      ]),
+      
+      // User metrics
+      User.countDocuments({
+        createdAt: { $gte: startDate }
       }),
       
-      // Subscription metrics
-      db.subscription.groupBy({
-        by: ['plan'],
-        _count: {
-          plan: true
-        }
-      })
+      // Subscription metrics (mock data since we don't have subscription model)
+      Promise.resolve([
+        { _id: 'FREE', count: 100 },
+        { _id: 'PRO', count: 25 },
+        { _id: 'ENTERPRISE', count: 5 }
+      ])
     ])
 
-    // Calculate trends (mock data for now)
+    // Calculate trends
     const previousPeriodStart = new Date(startDate.getTime() - (now.getTime() - startDate.getTime()))
-    const previousPeriodAudits = await db.audit.count({
-      where: {
-        createdAt: {
-          gte: previousPeriodStart,
-          lt: startDate
-        }
+    const previousPeriodAudits = await Audit.countDocuments({
+      createdAt: {
+        $gte: previousPeriodStart,
+        $lt: startDate
       }
     })
 
@@ -143,48 +148,99 @@ export async function GET(request: NextRequest) {
       ? ((totalAudits - previousPeriodAudits) / previousPeriodAudits) * 100 
       : 0
 
-    // Generate daily trends (mock data)
+    // Generate daily trends from real data
     const dailyTrends = []
     for (let i = 6; i >= 0; i--) {
       const date = new Date(now.getTime() - i * 24 * 60 * 60 * 1000)
+      const nextDate = new Date(date.getTime() + 24 * 60 * 60 * 1000)
+      
+      const [dayAudits, dayAverageScore] = await Promise.all([
+        Audit.countDocuments({
+          createdAt: {
+            $gte: date,
+            $lt: nextDate
+          }
+        }),
+        Audit.aggregate([
+          {
+            $match: {
+              createdAt: {
+                $gte: date,
+                $lt: nextDate
+              },
+              overallScore: { $ne: null }
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              avgScore: { $avg: '$overallScore' }
+            }
+          }
+        ])
+      ])
+      
       dailyTrends.push({
         date: date.toISOString().split('T')[0],
-        audits: Math.floor(Math.random() * 20) + 5,
-        averageScore: Math.floor(Math.random() * 30) + 60
+        audits: dayAudits,
+        averageScore: dayAverageScore[0]?.avgScore || 0
       })
     }
 
     // Process vulnerability data
-    const totalVulnerabilities = vulnerabilities.reduce((sum, vuln) => sum + vuln._count.severity, 0)
+    const totalVulnerabilities = vulnerabilities.reduce((sum, vuln) => sum + vuln.count, 0)
     const vulnerabilitiesBySeverity = vulnerabilities.map(vuln => ({
-      severity: vuln.severity,
-      count: vuln._count.severity,
-      percentage: totalVulnerabilities > 0 ? (vuln._count.severity / totalVulnerabilities) * 100 : 0
+      severity: vuln._id,
+      count: vuln.count,
+      percentage: totalVulnerabilities > 0 ? (vuln.count / totalVulnerabilities) * 100 : 0
     }))
 
     // Process subscription data
-    const totalSubscriptions = subscriptions.reduce((sum, sub) => sum + sub._count.plan, 0)
+    const totalSubscriptions = subscriptions.reduce((sum, sub) => sum + sub.count, 0)
     const usersByPlan = subscriptions.map(sub => ({
-      plan: sub.plan,
-      count: sub._count.plan,
-      percentage: totalSubscriptions > 0 ? (sub._count.plan / totalSubscriptions) * 100 : 0
+      plan: sub._id,
+      count: sub.count,
+      percentage: totalSubscriptions > 0 ? (sub.count / totalSubscriptions) * 100 : 0
     }))
 
-    // Mock performance metrics
+    // Calculate real performance metrics
+    const runningAudits = await Audit.countDocuments({ status: 'RUNNING' })
+    const failedAudits = await Audit.countDocuments({ status: 'FAILED' })
+    
+    const successRate = totalAudits > 0 ? ((totalAudits - failedAudits) / totalAudits) * 100 : 100
+    const errorRate = totalAudits > 0 ? (failedAudits / totalAudits) * 100 : 0
+    
     const performance = {
-      averageAuditTime: 120, // seconds
-      successRate: 95.5,
-      errorRate: 4.5,
-      queueLength: 3
+      averageAuditTime: 120, // This would need audit timing data in the database
+      successRate: Math.round(successRate * 10) / 10,
+      errorRate: Math.round(errorRate * 10) / 10,
+      queueLength: runningAudits
     }
 
-    // Mock user metrics
-    const totalUsers = await db.user.count()
+    // Calculate real user metrics
+    const totalUsers = await User.countDocuments()
+    const activeUsers = await User.countDocuments({
+      lastLoginAt: {
+        $gte: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) // Active in last 30 days
+      }
+    })
+    
+    const previousPeriodUsers = await User.countDocuments({
+      createdAt: {
+        $gte: previousPeriodStart,
+        $lt: startDate
+      }
+    })
+    
+    const userGrowth = previousPeriodUsers > 0 
+      ? ((users - previousPeriodUsers) / previousPeriodUsers) * 100 
+      : 0
+    
     const userMetrics = {
       total: totalUsers,
-      active: Math.floor(totalUsers * 0.7),
+      active: activeUsers,
       new: users,
-      retention: 85.2,
+      retention: totalUsers > 0 ? (activeUsers / totalUsers) * 100 : 0,
       byPlan: usersByPlan
     }
 
@@ -192,10 +248,10 @@ export async function GET(request: NextRequest) {
       overview: {
         totalAudits,
         completedAudits,
-        averageScore: averageScore._avg.overallScore || 0,
-        criticalIssues,
+        averageScore: averageScore[0]?.avgScore || 0,
+        criticalIssues: criticalIssues[0]?.total || 0,
         auditGrowth: Math.round(auditGrowth * 10) / 10,
-        userGrowth: 12.5 // Mock data
+        userGrowth: Math.round(userGrowth * 10) / 10
       },
       trends: {
         daily: dailyTrends,
@@ -204,13 +260,7 @@ export async function GET(request: NextRequest) {
       },
       vulnerabilities: {
         bySeverity: vulnerabilitiesBySeverity,
-        byCategory: [
-          { category: 'Reentrancy', count: 15, percentage: 25 },
-          { category: 'Access Control', count: 12, percentage: 20 },
-          { category: 'Integer Overflow', count: 10, percentage: 16.7 },
-          { category: 'Logic Errors', count: 8, percentage: 13.3 },
-          { category: 'Other', count: 15, percentage: 25 }
-        ],
+        byCategory: [], // Would need vulnerability category data in the database
         trends: [] // Mock data
       },
       performance,

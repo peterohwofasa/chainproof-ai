@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db } from '@/lib/db'
+import { connectDB, User } from '@/models'
 import { SecurityUtils } from '@/lib/security'
 
 export async function GET(request: NextRequest) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -15,23 +17,19 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const user = await db.user.findUnique({
-      where: { id: session.user.id! },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        createdAt: true,
-        lastLoginAt: true,
-        subscriptions: {
-          select: {
-            plan: true,
-            creditsRemaining: true,
-            status: true
-          }
-        }
-      }
-    })
+    const user = await User.findById(session.user.id)
+      .select({
+        _id: 1,
+        email: 1,
+        name: 1,
+        createdAt: 1,
+        lastLoginAt: 1,
+        bio: 1,
+        company: 1,
+        website: 1,
+        location: 1
+      })
+      .lean()
 
     if (!user) {
       return NextResponse.json(
@@ -40,7 +38,20 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    return NextResponse.json({ user })
+    // Transform _id to id for frontend compatibility
+    const transformedUser = {
+      id: user._id.toString(),
+      email: user.email,
+      name: user.name,
+      createdAt: user.createdAt,
+      lastLoginAt: user.lastLoginAt,
+      bio: user.bio,
+      company: user.company,
+      website: user.website,
+      location: user.location
+    }
+
+    return NextResponse.json({ user: transformedUser })
   } catch (error) {
     console.error('Profile fetch error:', error)
     return NextResponse.json(
@@ -52,6 +63,8 @@ export async function GET(request: NextRequest) {
 
 export async function PUT(request: NextRequest) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -99,19 +112,51 @@ export async function PUT(request: NextRequest) {
       }) : undefined
     }
 
-    const updatedUser = await db.user.update({
-      where: { id: session.user.id },
-      data: sanitizedData,
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        createdAt: true,
-        updatedAt: true
-      }
-    })
+    // Remove undefined values
+    const updateData = Object.fromEntries(
+      Object.entries(sanitizedData).filter(([_, value]) => value !== undefined)
+    )
 
-    return NextResponse.json({ user: updatedUser })
+    const updatedUser = await User.findByIdAndUpdate(
+      session.user.id,
+      updateData,
+      { 
+        new: true,
+        select: {
+          _id: 1,
+          email: 1,
+          name: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          bio: 1,
+          company: 1,
+          website: 1,
+          location: 1
+        }
+      }
+    ).lean()
+
+    if (!updatedUser) {
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      )
+    }
+
+    // Transform _id to id for frontend compatibility
+    const transformedUser = {
+      id: updatedUser._id.toString(),
+      email: updatedUser.email,
+      name: updatedUser.name,
+      createdAt: updatedUser.createdAt,
+      updatedAt: updatedUser.updatedAt,
+      bio: updatedUser.bio,
+      company: updatedUser.company,
+      website: updatedUser.website,
+      location: updatedUser.location
+    }
+
+    return NextResponse.json({ user: transformedUser })
   } catch (error) {
     console.error('Profile update error:', error)
     return NextResponse.json(

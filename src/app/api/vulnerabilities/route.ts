@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db as prisma } from '@/lib/db'
+import { connectDB, Vulnerability, Audit, Contract } from '@/models'
 import { z } from 'zod'
-import { Severity } from '@prisma/client'
 
 const createVulnerabilitySchema = z.object({
   title: z.string().min(1, 'Title is required'),
   description: z.string().min(1, 'Description is required'),
-  severity: z.nativeEnum(Severity),
+  severity: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
   category: z.string().min(1, 'Category is required'),
   recommendation: z.string().min(1, 'Recommendation is required'),
   lineNumber: z.number().int().positive().optional(),
@@ -18,6 +17,8 @@ const createVulnerabilitySchema = z.object({
 
 export async function GET(request: NextRequest) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -27,76 +28,104 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1')
     const limit = parseInt(searchParams.get('limit') || '10')
     const search = searchParams.get('search') || ''
-    const severity = searchParams.get('severity') as Severity | null
+    const severity = searchParams.get('severity')
     const category = searchParams.get('category')
     const auditId = searchParams.get('auditId')
 
     const skip = (page - 1) * limit
 
-    // Build where clause based on user's audits
-    const userAudits = await prisma.audit.findMany({
-      where: { userId: session.user.id },
-      select: { id: true },
-    })
+    // Build filter clause based on user's audits
+    const userAudits = await Audit.find({ userId: session.user.id })
+      .select('_id')
+      .lean()
 
-    const auditIds = userAudits.map(a => a.id)
+    const auditIds = userAudits.map(a => a._id)
 
-    const where: any = {
-      auditId: { in: auditIds },
+    const filter: any = {
+      auditId: { $in: auditIds },
     }
 
     if (search) {
-      where.OR = [
-        { title: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
-        { category: { contains: search, mode: 'insensitive' } },
+      filter.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { category: { $regex: search, $options: 'i' } },
       ]
     }
 
     if (severity) {
-      where.severity = severity
+      filter.severity = severity
     }
 
     if (category) {
-      where.category = { contains: category, mode: 'insensitive' }
+      filter.category = { $regex: category, $options: 'i' }
     }
 
     if (auditId) {
-      where.auditId = auditId
+      filter.auditId = auditId
     }
 
+    // Define severity order for sorting
+    const severityOrder = { 'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1 }
+
     const [vulnerabilities, total] = await Promise.all([
-      prisma.vulnerability.findMany({
-        where,
-        include: {
-          audit: {
-            select: {
-              id: true,
-              status: true,
-              overallScore: true,
-              riskLevel: true,
-              contract: {
-                select: {
-                  id: true,
-                  name: true,
-                  address: true,
-                },
-              },
-            },
-          },
-        },
-        orderBy: [
-          { severity: 'desc' },
-          { createdAt: 'desc' },
-        ],
-        skip,
-        take: limit,
-      }),
-      prisma.vulnerability.count({ where }),
+      Vulnerability.find(filter)
+        .populate({
+          path: 'auditId',
+          select: 'status overallScore riskLevel contractId',
+          populate: {
+            path: 'contractId',
+            select: 'name address'
+          }
+        })
+        .sort({ 
+          severity: -1, // This will sort alphabetically, we'll handle proper sorting below
+          createdAt: -1 
+        })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Vulnerability.countDocuments(filter),
     ])
 
+    // Sort vulnerabilities by severity properly
+    const sortedVulnerabilities = vulnerabilities.sort((a, b) => {
+      const severityA = severityOrder[a.severity as keyof typeof severityOrder] || 0
+      const severityB = severityOrder[b.severity as keyof typeof severityOrder] || 0
+      if (severityA !== severityB) {
+        return severityB - severityA // Descending order
+      }
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    })
+
+    // Transform for frontend compatibility
+    const transformedVulnerabilities = sortedVulnerabilities.map(vuln => ({
+      id: vuln._id.toString(),
+      title: vuln.title,
+      description: vuln.description,
+      severity: vuln.severity,
+      category: vuln.category,
+      recommendation: vuln.recommendation,
+      lineNumber: vuln.lineNumber,
+      codeSnippet: vuln.codeSnippet,
+      auditId: vuln.auditId._id.toString(),
+      createdAt: vuln.createdAt,
+      updatedAt: vuln.updatedAt,
+      audit: {
+        id: vuln.auditId._id.toString(),
+        status: vuln.auditId.status,
+        overallScore: vuln.auditId.overallScore,
+        riskLevel: vuln.auditId.riskLevel,
+        contract: vuln.auditId.contractId ? {
+          id: vuln.auditId.contractId._id.toString(),
+          name: vuln.auditId.contractId.name,
+          address: vuln.auditId.contractId.address,
+        } : null,
+      },
+    }))
+
     return NextResponse.json({
-      vulnerabilities,
+      vulnerabilities: transformedVulnerabilities,
       pagination: {
         page,
         limit,
@@ -115,6 +144,8 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -124,11 +155,9 @@ export async function POST(request: NextRequest) {
     const validatedData = createVulnerabilitySchema.parse(body)
 
     // Verify audit access
-    const audit = await prisma.audit.findFirst({
-      where: {
-        id: validatedData.auditId,
-        userId: session.user.id,
-      },
+    const audit = await Audit.findOne({
+      _id: validatedData.auditId,
+      userId: session.user.id,
     })
 
     if (!audit) {
@@ -138,26 +167,45 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const vulnerability = await prisma.vulnerability.create({
-      data: validatedData,
-      include: {
-        audit: {
-          select: {
-            id: true,
-            status: true,
-            contract: {
-              select: {
-                id: true,
-                name: true,
-                address: true,
-              },
-            },
-          },
-        },
-      },
-    })
+    const vulnerability = await Vulnerability.create(validatedData)
 
-    return NextResponse.json(vulnerability, { status: 201 })
+    // Populate audit and contract data
+    const populatedVulnerability = await Vulnerability.findById(vulnerability._id)
+      .populate({
+        path: 'auditId',
+        select: 'status contractId',
+        populate: {
+          path: 'contractId',
+          select: 'name address'
+        }
+      })
+      .lean()
+
+    // Transform for frontend compatibility
+    const transformedVulnerability = {
+      id: vulnerability._id.toString(),
+      title: vulnerability.title,
+      description: vulnerability.description,
+      severity: vulnerability.severity,
+      category: vulnerability.category,
+      recommendation: vulnerability.recommendation,
+      lineNumber: vulnerability.lineNumber,
+      codeSnippet: vulnerability.codeSnippet,
+      auditId: vulnerability.auditId.toString(),
+      createdAt: vulnerability.createdAt,
+      updatedAt: vulnerability.updatedAt,
+      audit: {
+        id: populatedVulnerability.auditId._id.toString(),
+        status: populatedVulnerability.auditId.status,
+        contract: populatedVulnerability.auditId.contractId ? {
+          id: populatedVulnerability.auditId.contractId._id.toString(),
+          name: populatedVulnerability.auditId.contractId.name,
+          address: populatedVulnerability.auditId.contractId.address,
+        } : null,
+      },
+    }
+
+    return NextResponse.json(transformedVulnerability, { status: 201 })
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(

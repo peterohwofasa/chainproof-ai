@@ -3,7 +3,8 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { withAuth } from '@/lib/middleware';
 import { logger } from '@/lib/logger';
-import { db } from '@/lib/db';
+import connectDB from '@/lib/mongodb';
+import { Audit } from '@/models';
 import { addSSEConnection, removeSSEConnection } from '@/lib/sse';
 
 export async function GET(
@@ -19,12 +20,13 @@ export async function GET(
 
     const { auditId } = params;
     
+    // Connect to database
+    await connectDB();
+    
     // Verify user has access to this audit
-    const audit = await db.audit.findFirst({
-      where: {
-        id: auditId,
-        userId: session.user.id
-      }
+    const audit = await Audit.findOne({
+      _id: auditId,
+      userId: session.user.id
     });
 
     if (!audit) {

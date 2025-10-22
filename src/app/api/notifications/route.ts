@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db } from '@/lib/db'
+import { connectDB, Notification } from '@/models'
 
 export async function GET(request: NextRequest) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -18,34 +20,40 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '50')
     const offset = parseInt(searchParams.get('offset') || '0')
 
-    const notifications = await db.notification.findMany({
-      where: {
-        userId: session.user.id
-      },
-      orderBy: {
-        createdAt: 'desc'
-      },
-      take: limit,
-      skip: offset,
-      select: {
-        id: true,
-        type: true,
-        title: true,
-        message: true,
-        read: true,
-        createdAt: true,
-        data: true
-      }
+    const notifications = await Notification.find({
+      userId: session.user.id
+    })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .skip(offset)
+    .select({
+      _id: 1,
+      type: 1,
+      title: 1,
+      message: 1,
+      read: 1,
+      createdAt: 1,
+      data: 1
+    })
+    .lean()
+
+    const totalCount = await Notification.countDocuments({
+      userId: session.user.id
     })
 
-    const totalCount = await db.notification.count({
-      where: {
-        userId: session.user.id
-      }
-    })
+    // Transform _id to id for frontend compatibility
+    const transformedNotifications = notifications.map(notification => ({
+      id: (notification as any)._id.toString(),
+      type: notification.type,
+      title: notification.title,
+      message: notification.message,
+      read: notification.read,
+      createdAt: notification.createdAt,
+      data: notification.data
+    }))
 
     return NextResponse.json({
-      notifications,
+      notifications: transformedNotifications,
       totalCount,
       hasMore: offset + limit < totalCount
     })
@@ -60,6 +68,8 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -79,26 +89,25 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const notification = await db.notification.create({
-      data: {
-        userId: session.user.id,
-        type,
-        title,
-        message,
-        data: data ? JSON.stringify(data) : null
-      },
-      select: {
-        id: true,
-        type: true,
-        title: true,
-        message: true,
-        read: true,
-        createdAt: true,
-        data: true
-      }
+    const notification = await Notification.create({
+      userId: session.user.id,
+      type,
+      title,
+      message,
+      data: data ? JSON.stringify(data) : null
     })
 
-    return NextResponse.json({ notification })
+    return NextResponse.json({ 
+      notification: {
+        id: notification._id.toString(),
+        type: notification.type,
+        title: notification.title,
+        message: notification.message,
+        read: notification.read,
+        createdAt: notification.createdAt,
+        data: notification.data
+      }
+    })
   } catch (error) {
     console.error('Notification creation error:', error)
     return NextResponse.json(

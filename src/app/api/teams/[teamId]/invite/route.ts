@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db } from '@/lib/db'
+import connectDB from '@/lib/mongodb'
+import { TeamMember, User, TeamInvitation, Team, Activity } from '@/models'
 import { SecurityUtils } from '@/lib/security'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -10,6 +11,8 @@ export async function POST(
   { params }: { params: Promise<{ teamId: string }> }
 ) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -39,15 +42,11 @@ export async function POST(
     }
 
     // Check if user has permission to invite (owner or admin)
-    const teamMember = await db.teamMember.findFirst({
-      where: {
-        teamId,
-        userId: session.user.id,
-        role: {
-          in: ['OWNER', 'ADMIN']
-        }
-      }
-    })
+    const teamMember = await TeamMember.findOne({
+      teamId,
+      userId: session.user.id,
+      role: { $in: ['OWNER', 'ADMIN'] }
+    }).lean()
 
     if (!teamMember) {
       return NextResponse.json(
@@ -56,18 +55,15 @@ export async function POST(
       )
     }
 
-    // Check if user is already a member
-    const existingUser = await db.user.findUnique({
-      where: { email }
-    })
+    // Check if user already exists
+    const existingUser = await User.findOne({ email }).lean()
 
     if (existingUser) {
-      const existingMember = await db.teamMember.findFirst({
-        where: {
-          teamId,
-          userId: existingUser.id
-        }
-      })
+      // Check if user is already a team member
+      const existingMember = await TeamMember.findOne({
+        teamId,
+        userId: (existingUser as any)._id
+      }).lean()
 
       if (existingMember) {
         return NextResponse.json(
@@ -78,16 +74,12 @@ export async function POST(
     }
 
     // Check if there's already a pending invitation
-    const existingInvitation = await db.teamInvitation.findFirst({
-      where: {
-        teamId,
-        email,
-        acceptedAt: null,
-        expiresAt: {
-          gt: new Date()
-        }
-      }
-    })
+    const existingInvitation = await TeamInvitation.findOne({
+      teamId,
+      email,
+      acceptedAt: null,
+      expiresAt: { $gt: new Date() }
+    }).lean()
 
     if (existingInvitation) {
       return NextResponse.json(
@@ -100,50 +92,38 @@ export async function POST(
     const invitationToken = uuidv4()
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
 
-    const invitation = await db.teamInvitation.create({
-      data: {
-        teamId,
-        email,
-        role,
-        token: invitationToken,
-        expiresAt,
-        invitedBy: session.user.id
-      },
-      include: {
-        team: {
-          select: {
-            name: true,
-            owner: {
-              select: {
-                name: true,
-                email: true
-              }
-            }
-          }
-        }
-      }
+    const invitation = await TeamInvitation.create({
+      teamId,
+      email,
+      role,
+      token: invitationToken,
+      expiresAt,
+      invitedBy: session.user.id
     })
+
+    const team = await Team.findById(teamId).populate('owner', 'name email').lean()
 
     // TODO: Send invitation email
     // await sendInvitationEmail(email, invitationToken, invitation.team.name)
 
     // Create activity log
-    await db.activity.create({
-      data: {
-        userId: session.user.id,
-        action: 'TEAM_JOINED',
-        target: teamId,
-        metadata: JSON.stringify({ 
-          invitedEmail: email,
-          role 
-        })
-      }
+    await Activity.create({
+      userId: session.user.id,
+      action: 'TEAM_JOINED',
+      target: teamId,
+      metadata: JSON.stringify({ 
+        invitedEmail: email,
+        role 
+      })
     })
 
     return NextResponse.json({ 
       success: true,
       message: 'Invitation sent successfully',
-      invitation
+      invitation: {
+        ...invitation.toObject(),
+        team
+      }
     })
   } catch (error) {
     console.error('Team invitation error:', error)

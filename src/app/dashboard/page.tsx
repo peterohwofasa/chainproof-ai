@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Progress } from '@/components/ui/progress'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { 
   Shield, 
   AlertTriangle, 
@@ -24,68 +25,69 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 
-// Mock data for demonstration
-const mockAudits = [
-  {
-    id: '1',
-    contractName: 'VulnerableToken',
-    overallScore: 45,
-    riskLevel: 'HIGH',
-    status: 'COMPLETED',
-    createdAt: new Date('2024-01-15'),
-    vulnerabilities: [
-      { severity: 'CRITICAL', count: 1 },
-      { severity: 'HIGH', count: 2 },
-      { severity: 'MEDIUM', count: 3 },
-      { severity: 'LOW', count: 1 }
-    ]
-  },
-  {
-    id: '2',
-    contractName: 'SafeContract',
-    overallScore: 85,
-    riskLevel: 'LOW',
-    status: 'COMPLETED',
-    createdAt: new Date('2024-01-14'),
-    vulnerabilities: [
-      { severity: 'LOW', count: 2 },
-      { severity: 'INFO', count: 3 }
-    ]
-  },
-  {
-    id: '3',
-    contractName: 'DeFiProtocol',
-    overallScore: 72,
-    riskLevel: 'MEDIUM',
-    status: 'COMPLETED',
-    createdAt: new Date('2024-01-13'),
-    vulnerabilities: [
-      { severity: 'HIGH', count: 1 },
-      { severity: 'MEDIUM', count: 2 },
-      { severity: 'LOW', count: 4 }
-    ]
-  }
-]
+// Import Vulnerability interface
+interface Vulnerability {
+  id: string
+  type: string
+  severity: 'low' | 'medium' | 'high' | 'critical'
+  title: string
+  description: string
+  location: string
+  recommendation: string
+  confidence: number
+}
 
-const mockStats = {
-  totalAudits: 24,
-  criticalVulnerabilities: 8,
-  highVulnerabilities: 15,
-  averageScore: 68,
-  contractsSecured: 18
+// Fetch real data from the database
+async function fetchUserAudits(userId: string) {
+  try {
+    const response = await fetch(`/api/audits?userId=${userId}`)
+    if (!response.ok) {
+      throw new Error('Failed to fetch audits')
+    }
+    const data = await response.json()
+    return data.audits || []
+  } catch (error) {
+    console.error('Error fetching audits:', error)
+    return []
+  }
+}
+
+async function fetchUserStats(userId: string) {
+  try {
+    const response = await fetch(`/api/dashboard/stats?userId=${userId}`)
+    if (!response.ok) {
+      throw new Error('Failed to fetch stats')
+    }
+    return await response.json()
+  } catch (error) {
+    console.error('Error fetching stats:', error)
+    return {
+      totalAudits: 0,
+      criticalVulnerabilities: 0,
+      highVulnerabilities: 0,
+      averageScore: 0,
+      contractsSecured: 0
+    }
+  }
 }
 
 export default function DashboardPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
-  const [audits, setAudits] = useState(mockAudits)
-  const [stats, setStats] = useState(mockStats)
+  const [audits, setAudits] = useState<any[]>([])
+  const [stats, setStats] = useState({
+    totalAudits: 0,
+    criticalVulnerabilities: 0,
+    highVulnerabilities: 0,
+    averageScore: 0,
+    contractsSecured: 0
+  })
   const [selectedAudit, setSelectedAudit] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
 
-  const handleExportReport = (audit: any) => {
-    // Generate and download audit report
+  const handleExportReport = (audit: any, format: 'json' | 'txt' | 'pdf' = 'json') => {
     const reportData = {
-      contractName: audit.contractName,
+      contractName: audit.contract?.name || 'Smart Contract',
       overallScore: audit.overallScore,
       riskLevel: audit.riskLevel,
       vulnerabilities: audit.vulnerabilities,
@@ -93,15 +95,75 @@ export default function DashboardPage() {
       reportGenerated: new Date()
     }
     
-    const dataStr = JSON.stringify(reportData, null, 2)
-    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr)
-    
-    const exportFileDefaultName = `${audit.contractName}_audit_report.json`
-    
-    const linkElement = document.createElement('a')
-    linkElement.setAttribute('href', dataUri)
-    linkElement.setAttribute('download', exportFileDefaultName)
-    linkElement.click()
+    if (format === 'json') {
+      const dataStr = JSON.stringify(reportData, null, 2)
+      const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr)
+      const exportFileDefaultName = `${reportData.contractName}_audit_report.json`
+      
+      const linkElement = document.createElement('a')
+      linkElement.setAttribute('href', dataUri)
+      linkElement.setAttribute('download', exportFileDefaultName)
+      linkElement.click()
+    } else if (format === 'txt') {
+      const textReport = generateTextReport(reportData)
+      const dataUri = 'data:text/plain;charset=utf-8,'+ encodeURIComponent(textReport)
+      const exportFileDefaultName = `${reportData.contractName}_audit_report.txt`
+      
+      const linkElement = document.createElement('a')
+      linkElement.setAttribute('href', dataUri)
+      linkElement.setAttribute('download', exportFileDefaultName)
+      linkElement.click()
+    } else if (format === 'pdf') {
+      // For PDF, we'll redirect to a PDF generation endpoint
+      window.open(`/api/audits/${audit.id}/report?format=pdf`, '_blank')
+    }
+  }
+
+  const generateTextReport = (reportData: any) => {
+    const vulnerabilitiesByType = reportData.vulnerabilities.reduce((acc: any, vuln: any) => {
+      if (!acc[vuln.severity]) acc[vuln.severity] = []
+      acc[vuln.severity].push(vuln)
+      return acc
+    }, {})
+
+    return `
+SMART CONTRACT SECURITY AUDIT REPORT
+=====================================
+
+Contract Name: ${reportData.contractName}
+Audit Date: ${new Date(reportData.createdAt).toLocaleDateString()}
+Report Generated: ${reportData.reportGenerated.toLocaleDateString()}
+
+OVERALL ASSESSMENT
+==================
+Security Score: ${reportData.overallScore}/100
+Risk Level: ${reportData.riskLevel}
+Total Vulnerabilities Found: ${reportData.vulnerabilities.length}
+
+VULNERABILITY BREAKDOWN
+=======================
+${Object.entries(vulnerabilitiesByType).map(([severity, vulns]: [string, any]) => `
+${severity.toUpperCase()} SEVERITY (${vulns.length} issues):
+${vulns.map((vuln: any, index: number) => `
+  ${index + 1}. ${vuln.title}
+     Description: ${vuln.description}
+     Location: Line ${vuln.lineNumber || 'N/A'}
+     Impact: ${vuln.impact || 'Not specified'}
+     Recommendation: ${vuln.recommendation || 'Review and fix this issue'}
+`).join('')}
+`).join('')}
+
+RECOMMENDATIONS
+===============
+1. Address all CRITICAL and HIGH severity vulnerabilities immediately
+2. Review and fix MEDIUM severity issues before deployment
+3. Consider LOW severity issues for code quality improvements
+4. Implement comprehensive testing for all fixes
+5. Consider a follow-up audit after implementing fixes
+
+This report was generated by ChainProof AI Security Audit System.
+For questions or support, please contact our security team.
+    `.trim()
   }
 
   const handleViewAudit = (audit: any) => {
@@ -109,14 +171,41 @@ export default function DashboardPage() {
     router.push(`/audit/report/${audit.id}`)
   }
 
-  // Show loading state while checking authentication
-  if (status === 'loading') {
+  // Fetch real data when component mounts and user is authenticated
+  useEffect(() => {
+    const loadDashboardData = async () => {
+      if (session?.user?.id) {
+        setLoading(true)
+        try {
+          const [auditsData, statsData] = await Promise.all([
+            fetchUserAudits(session.user.id),
+            fetchUserStats(session.user.id)
+          ])
+          setAudits(auditsData)
+          setStats(statsData)
+        } catch (error) {
+          console.error('Error loading dashboard data:', error)
+        } finally {
+          setLoading(false)
+        }
+      }
+    }
+
+    if (status === 'authenticated') {
+      loadDashboardData()
+    }
+  }, [session, status])
+
+  // Show loading state while checking authentication or fetching data
+  if (status === 'loading' || loading) {
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="flex items-center justify-center min-h-96">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600 dark:text-gray-300">Loading dashboard...</p>
+            <p className="text-gray-600 dark:text-gray-300">
+              {status === 'loading' ? 'Loading dashboard...' : 'Fetching your audit data...'}
+            </p>
           </div>
         </div>
       </div>
@@ -284,8 +373,27 @@ export default function DashboardPage() {
         </TabsList>
 
         <TabsContent value="recent" className="space-y-6">
-          <div className="grid gap-6">
-            {audits.map((audit) => (
+          {audits.length === 0 ? (
+            <Card>
+              <CardContent className="p-12 text-center">
+                <Shield className="w-16 h-16 mx-auto mb-4 text-gray-400" />
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+                  No audits yet
+                </h3>
+                <p className="text-gray-600 dark:text-gray-400 mb-6">
+                  Start securing your smart contracts by running your first security audit.
+                </p>
+                <Button asChild>
+                  <Link href="/audit">
+                    <Shield className="w-4 h-4 mr-2" />
+                    Start First Audit
+                  </Link>
+                </Button>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid gap-6">
+              {audits.map((audit) => (
               <Card key={audit.id} className="hover:shadow-lg transition-shadow">
                 <CardHeader>
                   <div className="flex items-center justify-between">
@@ -294,7 +402,7 @@ export default function DashboardPage() {
                         <CardTitle className="text-lg">{audit.contractName}</CardTitle>
                         <CardDescription className="flex items-center gap-2 mt-1">
                           <Calendar className="w-4 h-4" />
-                          {audit.createdAt.toLocaleDateString()}
+                          {new Date(audit.createdAt).toLocaleDateString()}
                         </CardDescription>
                       </div>
                     </div>
@@ -316,14 +424,25 @@ export default function DashboardPage() {
                           <Eye className="w-4 h-4 mr-1" />
                           View
                         </Button>
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => handleExportReport(audit)}
-                        >
-                          <Download className="w-4 h-4 mr-1" />
-                          Export
-                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" size="sm">
+                              <Download className="w-4 h-4 mr-1" />
+                              Export
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent>
+                            <DropdownMenuItem onClick={() => handleExportReport(audit, 'json')}>
+                              Export as JSON
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleExportReport(audit, 'txt')}>
+                              Export as Text
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleExportReport(audit, 'pdf')}>
+                              Export as PDF
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </div>
                   </div>
@@ -339,9 +458,14 @@ export default function DashboardPage() {
                     <Progress value={audit.overallScore} className="h-2" />
                     
                     <div className="flex flex-wrap gap-2">
-                      {audit.vulnerabilities.map((vuln, index) => (
-                        <Badge key={index} variant="secondary" className={getSeverityColor(vuln.severity)}>
-                          {vuln.severity}: {vuln.count}
+                      {(Object.entries(
+                        audit.vulnerabilities.reduce((acc: Record<string, number>, vuln: Vulnerability) => {
+                          acc[vuln.severity] = (acc[vuln.severity] || 0) + 1
+                          return acc
+                        }, {} as Record<string, number>)
+                      ) as [string, number][]).map(([severity, count]) => (
+                        <Badge key={severity} variant="secondary" className={getSeverityColor(severity as 'low' | 'medium' | 'high' | 'critical')}>
+                          {severity}: {count}
                         </Badge>
                       ))}
                     </div>
@@ -349,7 +473,8 @@ export default function DashboardPage() {
                 </CardContent>
               </Card>
             ))}
-          </div>
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="analytics" className="space-y-6">

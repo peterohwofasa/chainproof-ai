@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db } from '@/lib/db'
+import { connectDB, Notification } from '@/models'
 
 export async function GET(request: NextRequest) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -14,11 +16,9 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    const unreadCount = await db.notification.count({
-      where: {
-        userId: session.user.id,
-        read: false
-      }
+    const unreadCount = await Notification.countDocuments({
+      userId: session.user.id,
+      read: false
     })
 
     return NextResponse.json({ count: unreadCount })

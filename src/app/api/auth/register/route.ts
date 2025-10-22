@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import connectDB from '@/lib/mongodb'
+import { User, Subscription, SubscriptionPlan, SubscriptionStatus } from '@/models'
 import { AuthService, AuthError, createAuthResponse } from '@/lib/auth'
 import { SecurityUtils } from '@/lib/security'
 import { z } from 'zod'
@@ -12,6 +13,9 @@ const registerSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
+    // Connect to MongoDB
+    await connectDB()
+    
     const body = await request.json()
     
     // Validate input
@@ -19,41 +23,35 @@ export async function POST(request: NextRequest) {
     const { email, password, name } = validatedData
 
     // Check if user already exists
-    const existingUser = await db.user.findUnique({
-      where: { email }
-    })
+    const existingUser = await User.findOne({ email })
 
     if (existingUser) {
       throw new AuthError('User with this email already exists', 'USER_EXISTS')
     }
 
     // Hash password
-    const hashedPassword = await AuthService.hashPassword(password)
+    const hashedPassword = await SecurityUtils.hashPassword(password)
 
     // Create user
-    const user = await db.user.create({
-      data: {
-        email,
-        name: name || null,
-        // In a real implementation, you'd store the hashed password
-        // For now, we'll use the email as a placeholder since our schema doesn't have password field
-      },
+    const user = await User.create({
+      email,
+      name: name || null,
+      password: hashedPassword,
+      emailVerified: process.env.NODE_ENV === 'development', // Auto-verify in development
     })
 
     // Create default subscription
-    await db.subscription.create({
-      data: {
-        userId: user.id,
-        plan: 'FREE',
-        status: 'ACTIVE',
-        creditsRemaining: 3, // 3 free audits per month
-      },
+    await Subscription.create({
+      userId: user._id.toString(),
+      plan: SubscriptionPlan.FREE,
+      status: SubscriptionStatus.ACTIVE,
+      creditsRemaining: 3, // 3 free audits per month
     })
 
     // Create auth response
     const token = SecurityUtils.generateSecureToken(64)
     const response = createAuthResponse({
-      id: user.id,
+      id: user._id.toString(),
       email: user.email,
       name: user.name,
     }, token)

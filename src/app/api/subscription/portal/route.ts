@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { createStripeCustomerPortalSession } from '@/lib/stripe'
-import { db } from '@/lib/db'
+import { connectDB, Subscription } from '@/models'
 
 export async function POST(request: NextRequest) {
   try {
@@ -15,11 +15,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Connect to MongoDB
+    await connectDB()
+
     // Get user's subscription
-    const userSubscription = await db.subscription.findFirst({
-      where: { userId: session.user.id },
-      select: { stripeCustomerId: true }
-    })
+    const userSubscription = await Subscription.findOne({ userId: session.user.id })
+      .select('stripeCustomerId')
+      .lean()
 
     if (!userSubscription?.stripeCustomerId) {
       return NextResponse.json(

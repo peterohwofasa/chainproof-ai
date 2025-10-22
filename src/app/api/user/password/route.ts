@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db } from '@/lib/db'
+import { connectDB, User } from '@/models'
 import { SecurityUtils } from '@/lib/security'
 
 export async function PUT(request: NextRequest) {
@@ -33,16 +33,13 @@ export async function PUT(request: NextRequest) {
       )
     }
 
+    // Connect to MongoDB
+    await connectDB()
+
     // Get current user with password
-    const user = await db.user.findUnique({
-      where: { id: session.user.id },
-      select: {
-        id: true,
-        password: true,
-        failedLoginAttempts: true,
-        lockedUntil: true
-      }
-    })
+    const user = await User.findById(session.user.id)
+      .select('password failedLoginAttempts lockedUntil')
+      .lean()
 
     if (!user) {
       return NextResponse.json(
@@ -67,15 +64,12 @@ export async function PUT(request: NextRequest) {
 
     if (!isCurrentPasswordValid) {
       // Increment failed attempts
-      await db.user.update({
-        where: { id: user.id },
-        data: {
-          failedLoginAttempts: (user.failedLoginAttempts || 0) + 1,
-          lastFailedLogin: new Date(),
-          lockedUntil: (user.failedLoginAttempts || 0) >= 4 
-            ? new Date(Date.now() + 30 * 60 * 1000) 
-            : null
-        }
+      await User.findByIdAndUpdate(user._id, {
+        failedLoginAttempts: (user.failedLoginAttempts || 0) + 1,
+        lastFailedLogin: new Date(),
+        lockedUntil: (user.failedLoginAttempts || 0) >= 4 
+          ? new Date(Date.now() + 30 * 60 * 1000) 
+          : null
       })
 
       return NextResponse.json(
@@ -88,15 +82,12 @@ export async function PUT(request: NextRequest) {
     const hashedNewPassword = await SecurityUtils.hashPassword(newPassword)
 
     // Update password and reset failed attempts
-    await db.user.update({
-      where: { id: user.id },
-      data: {
-        password: hashedNewPassword,
-        failedLoginAttempts: 0,
-        lastFailedLogin: null,
-        lockedUntil: null,
-        updatedAt: new Date()
-      }
+    await User.findByIdAndUpdate(user._id, {
+      password: hashedNewPassword,
+      failedLoginAttempts: 0,
+      lastFailedLogin: null,
+      lockedUntil: null,
+      updatedAt: new Date()
     })
 
     return NextResponse.json({ 

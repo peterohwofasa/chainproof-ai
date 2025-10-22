@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db } from '@/lib/db'
+import { connectDB, User } from '@/models'
 
 export async function POST(request: NextRequest) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -14,13 +16,30 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Disable 2FA for the user
-    await db.user.update({
-      where: { id: session.user.id },
-      data: {
-        // twoFactorEnabled: false,
-        // twoFactorSecret: null
-      }
+    // Check if user exists and has 2FA enabled
+    const user = await User.findById(session.user.id).select({
+      twoFactorEnabled: 1
+    }).lean()
+
+    if (!user) {
+      return NextResponse.json(
+        { error: 'User not found' },
+        { status: 404 }
+      )
+    }
+
+    if (!user.twoFactorEnabled) {
+      return NextResponse.json(
+        { error: 'Two-factor authentication is not enabled' },
+        { status: 400 }
+      )
+    }
+
+    // Disable 2FA for the user and clear related data
+    await User.findByIdAndUpdate(session.user.id, {
+      twoFactorEnabled: false,
+      twoFactorSecret: null,
+      twoFactorBackupCodes: []
     })
 
     return NextResponse.json({ 

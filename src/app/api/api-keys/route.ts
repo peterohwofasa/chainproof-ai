@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db } from '@/lib/db'
+import { connectDB, ApiKey, Subscription, SubscriptionStatus } from '@/models'
 import { SecurityUtils } from '@/lib/security'
 import { withErrorHandler, AuthenticationError, ValidationError } from '@/lib/error-handler'
 import { withAuth, withRateLimit } from '@/lib/middleware'
@@ -20,29 +20,37 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
   const rateLimitResponse = await withRateLimit(request, session.user.id, 20, 60000) // 20 requests per minute
   if (rateLimitResponse) return rateLimitResponse
 
+  // Connect to MongoDB
+  await connectDB()
+
   // Get user's API keys
-  const apiKeys = await db.apiKey.findMany({
-    where: {
-      userId: session.user.id,
-      isActive: true
-    },
-    select: {
-      id: true,
-      name: true,
-      keyPrefix: true,
-      permissions: true,
-      createdAt: true,
-      lastUsedAt: true,
-      expiresAt: true
-    },
-    orderBy: {
-      createdAt: 'desc'
-    }
+  const apiKeys = await ApiKey.find({
+    userId: session.user.id,
+    isActive: true
   })
+  .select({
+    _id: 1,
+    name: 1,
+    keyPrefix: 1,
+    permissions: 1,
+    createdAt: 1,
+    lastUsedAt: 1,
+    expiresAt: 1
+  })
+  .sort({ createdAt: -1 })
+  .lean()
 
   return NextResponse.json({
     success: true,
-    apiKeys
+    apiKeys: apiKeys.map(key => ({
+      id: (key._id as any).toString(),
+      name: key.name,
+      keyPrefix: key.keyPrefix,
+      permissions: key.permissions,
+      createdAt: key.createdAt,
+      lastUsedAt: key.lastUsedAt,
+      expiresAt: key.expiresAt
+    }))
   })
 })
 
@@ -85,26 +93,25 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     throw new ValidationError(`Invalid permissions: ${invalidPermissions.join(', ')}`)
   }
 
+  // Connect to MongoDB
+  await connectDB()
+
   // Check user's subscription plan limits
-  const subscription = await db.subscription.findFirst({
-    where: {
-      userId: session.user.id,
-      status: 'ACTIVE'
-    }
-  })
+  const subscription = await Subscription.findOne({
+    userId: session.user.id,
+    status: SubscriptionStatus.ACTIVE
+  }).lean()
 
   if (!subscription) {
     throw new ValidationError('Active subscription required')
   }
 
-  const existingApiKeys = await db.apiKey.count({
-    where: {
-      userId: session.user.id,
-      isActive: true
-    }
+  const existingApiKeys = await ApiKey.countDocuments({
+    userId: session.user.id,
+    isActive: true
   })
 
-  const maxKeys = subscription.plan === 'ENTERPRISE' ? 10 : subscription.plan === 'PRO' ? 3 : 1
+  const maxKeys = (subscription as any).plan === 'ENTERPRISE' ? 10 : (subscription as any).plan === 'PRO' ? 3 : 1
   if (existingApiKeys >= maxKeys) {
     throw new ValidationError(`Maximum API keys limit reached (${maxKeys})`)
   }
@@ -115,31 +122,25 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   const hashedKey = await SecurityUtils.hashPassword(apiKey)
 
   // Create API key record
-  const apiKeyRecord = await db.apiKey.create({
-    data: {
-      userId: session.user.id,
-      name,
-      hashedKey,
-      keyPrefix,
-      permissions: JSON.stringify(permissions),
-      expiresAt: expiresAt ? new Date(expiresAt) : null,
-    },
-    select: {
-      id: true,
-      name: true,
-      keyPrefix: true,
-      permissions: true,
-      createdAt: true,
-      expiresAt: true
-    }
+  const apiKeyRecord = await ApiKey.create({
+    userId: session.user.id,
+    name,
+    keyHash: hashedKey,
+    keyPrefix,
+    permissions,
+    expiresAt: expiresAt ? new Date(expiresAt) : undefined,
   })
 
   return NextResponse.json({
     success: true,
     apiKey: {
-      ...apiKeyRecord,
+      id: apiKeyRecord._id.toString(),
+      name: apiKeyRecord.name,
+      keyPrefix: apiKeyRecord.keyPrefix,
+      permissions: apiKeyRecord.permissions,
+      createdAt: apiKeyRecord.createdAt,
+      expiresAt: apiKeyRecord.expiresAt,
       key: apiKey, // Only return the full key on creation
-      permissions: JSON.parse(apiKeyRecord.permissions)
     }
   })
 })

@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db } from '@/lib/db'
+import { connectDB, Notification } from '@/models'
 
 export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ notificationId: string }> }
 ) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -22,12 +24,10 @@ export async function PUT(
     const { read } = body
 
     // Verify notification belongs to user
-    const existingNotification = await db.notification.findFirst({
-      where: {
-        id: notificationId,
-        userId: session.user.id
-      }
-    })
+    const existingNotification = await Notification.findOne({
+      _id: notificationId,
+      userId: session.user.id
+    }).lean()
 
     if (!existingNotification) {
       return NextResponse.json(
@@ -36,25 +36,34 @@ export async function PUT(
       )
     }
 
-    const updatedNotification = await db.notification.update({
-      where: {
-        id: notificationId
-      },
-      data: {
-        read: read !== undefined ? read : true
-      },
-      select: {
-        id: true,
-        type: true,
-        title: true,
-        message: true,
-        read: true,
-        createdAt: true,
-        data: true
+    const updatedNotification = await Notification.findByIdAndUpdate(
+      notificationId,
+      { read: read !== undefined ? read : true },
+      { 
+        new: true,
+        select: {
+          _id: 1,
+          type: 1,
+          title: 1,
+          message: 1,
+          read: 1,
+          createdAt: 1,
+          data: 1
+        }
+      }
+    ).lean()
+
+    return NextResponse.json({ 
+      notification: {
+        id: updatedNotification._id.toString(),
+        type: updatedNotification.type,
+        title: updatedNotification.title,
+        message: updatedNotification.message,
+        read: updatedNotification.read,
+        createdAt: updatedNotification.createdAt,
+        data: updatedNotification.data
       }
     })
-
-    return NextResponse.json({ notification: updatedNotification })
   } catch (error) {
     console.error('Notification update error:', error)
     return NextResponse.json(
@@ -69,6 +78,8 @@ export async function DELETE(
   { params }: { params: Promise<{ notificationId: string }> }
 ) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -81,12 +92,10 @@ export async function DELETE(
     const { notificationId } = await params
 
     // Verify notification belongs to user
-    const existingNotification = await db.notification.findFirst({
-      where: {
-        id: notificationId,
-        userId: session.user.id
-      }
-    })
+    const existingNotification = await Notification.findOne({
+      _id: notificationId,
+      userId: session.user.id
+    }).lean()
 
     if (!existingNotification) {
       return NextResponse.json(
@@ -95,11 +104,7 @@ export async function DELETE(
       )
     }
 
-    await db.notification.delete({
-      where: {
-        id: notificationId
-      }
-    })
+    await Notification.findByIdAndDelete(notificationId)
 
     return NextResponse.json({ success: true })
   } catch (error) {

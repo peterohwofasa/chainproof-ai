@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { db } from '@/lib/db'
+import connectDB from '@/lib/mongodb'
+import { Audit } from '@/models'
 
 export async function POST(request: NextRequest) {
   try {
+    await connectDB()
+    
     const session = await getServerSession(authOptions)
     
     if (!session?.user?.id) {
@@ -33,60 +36,22 @@ export async function POST(request: NextRequest) {
 
     // Fetch both audits with their vulnerabilities
     const [beforeAudit, afterAudit] = await Promise.all([
-      db.audit.findFirst({
-        where: {
-          id: beforeAuditId,
-          userId: session.user.id,
-          status: 'COMPLETED'
-        },
-        select: {
-          id: true,
-          overallScore: true,
-          riskLevel: true,
-          createdAt: true,
-          completedAt: true,
-          contract: {
-            select: {
-              name: true
-            }
-          },
-          vulnerabilities: {
-            select: {
-              severity: true,
-              title: true,
-              description: true,
-              category: true
-            }
-          }
-        }
-      }),
-      db.audit.findFirst({
-        where: {
-          id: afterAuditId,
-          userId: session.user.id,
-          status: 'COMPLETED'
-        },
-        select: {
-          id: true,
-          overallScore: true,
-          riskLevel: true,
-          createdAt: true,
-          completedAt: true,
-          contract: {
-            select: {
-              name: true
-            }
-          },
-          vulnerabilities: {
-            select: {
-              severity: true,
-              title: true,
-              description: true,
-              category: true
-            }
-          }
-        }
+      Audit.findOne({
+        _id: beforeAuditId,
+        userId: session.user.id,
+        status: 'COMPLETED'
       })
+      .populate('contractId', 'name')
+      .select('_id overallScore riskLevel createdAt completedAt contractId vulnerabilities')
+      .lean(),
+      Audit.findOne({
+        _id: afterAuditId,
+        userId: session.user.id,
+        status: 'COMPLETED'
+      })
+      .populate('contractId', 'name')
+      .select('_id overallScore riskLevel createdAt completedAt contractId vulnerabilities')
+      .lean()
     ])
 
     if (!beforeAudit || !afterAudit) {
@@ -118,12 +83,12 @@ export async function POST(request: NextRequest) {
       }))
     }
 
-    const beforeVulns = groupVulnerabilities(beforeAudit.vulnerabilities)
-    const afterVulns = groupVulnerabilities(afterAudit.vulnerabilities)
+    const beforeVulns = groupVulnerabilities((beforeAudit as any).vulnerabilities)
+    const afterVulns = groupVulnerabilities((afterAudit as any).vulnerabilities)
 
     // Calculate changes
-    const scoreChange = (afterAudit.overallScore || 0) - (beforeAudit.overallScore || 0)
-    const riskLevelChange = afterAudit.riskLevel
+    const scoreChange = ((afterAudit as any).overallScore || 0) - ((beforeAudit as any).overallScore || 0)
+    const riskLevelChange = (afterAudit as any).riskLevel
 
     // Calculate vulnerability changes
     const getVulnerabilityCount = (vulns: any[], severity: string) => {
@@ -133,7 +98,7 @@ export async function POST(request: NextRequest) {
     let vulnerabilitiesFixed = 0;
     let newVulnerabilities = 0;
 
-    (['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'] as const).forEach((severity: string) => {
+    (['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'] as const).forEach((severity) => {
       const beforeCount = getVulnerabilityCount(beforeVulns, severity)
       const afterCount = getVulnerabilityCount(afterVulns, severity)
       
@@ -145,12 +110,12 @@ export async function POST(request: NextRequest) {
     })
 
     // Identify improvements and regressions
-    const improvements: string[] = []
-    const regressions: string[] = []
+    const improvements = [] as string[]
+    const regressions = [] as string[]
 
     // Find fixed vulnerabilities
-    beforeAudit.vulnerabilities.forEach(beforeVuln => {
-      const isFixed = !afterAudit.vulnerabilities.some(afterVuln => 
+    (beforeAudit as any).vulnerabilities.forEach((beforeVuln: any) => {
+      const isFixed = !(afterAudit as any).vulnerabilities.some((afterVuln: any) => 
         afterVuln.title === beforeVuln.title && 
         afterVuln.category === beforeVuln.category
       )
@@ -161,8 +126,8 @@ export async function POST(request: NextRequest) {
     })
 
     // Find new vulnerabilities
-    afterAudit.vulnerabilities.forEach(afterVuln => {
-      const isNew = !beforeAudit.vulnerabilities.some(beforeVuln => 
+    (afterAudit as any).vulnerabilities.forEach((afterVuln: any) => {
+      const isNew = !(beforeAudit as any).vulnerabilities.some((beforeVuln: any) => 
         beforeVuln.title === afterVuln.title && 
         beforeVuln.category === afterVuln.category
       )
@@ -192,21 +157,21 @@ export async function POST(request: NextRequest) {
 
     const comparison = {
       beforeAudit: {
-        id: beforeAudit.id,
-        contractName: beforeAudit.contract.name,
-        overallScore: beforeAudit.overallScore,
-        riskLevel: beforeAudit.riskLevel,
-        status: beforeAudit.status,
-        createdAt: beforeAudit.createdAt.toISOString(),
+        id: (beforeAudit as any).id,
+        contractName: (beforeAudit as any).contract.name,
+        overallScore: (beforeAudit as any).overallScore,
+        riskLevel: (beforeAudit as any).riskLevel,
+        status: (beforeAudit as any).status,
+        createdAt: (beforeAudit as any).createdAt.toISOString(),
         vulnerabilities: beforeVulns
       },
       afterAudit: {
-        id: afterAudit.id,
-        contractName: afterAudit.contract.name,
-        overallScore: afterAudit.overallScore,
-        riskLevel: afterAudit.riskLevel,
-        status: afterAudit.status,
-        createdAt: afterAudit.createdAt.toISOString(),
+        id: (afterAudit as any).id,
+        contractName: (afterAudit as any).contract.name,
+        overallScore: (afterAudit as any).overallScore,
+        riskLevel: (afterAudit as any).riskLevel,
+        status: (afterAudit as any).status,
+        createdAt: (afterAudit as any).createdAt.toISOString(),
         vulnerabilities: afterVulns
       },
       scoreChange,

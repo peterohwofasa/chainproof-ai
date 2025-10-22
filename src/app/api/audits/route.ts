@@ -1,98 +1,135 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
+import { connectDB, Audit, Contract, Vulnerability } from '@/models'
 
 export async function GET(request: NextRequest) {
   try {
+    await connectDB()
+    
+    const session = await getServerSession(authOptions)
+    
+    if (!session?.user?.id) {
+      return NextResponse.json(
+        { error: 'Unauthorized' },
+        { status: 401 }
+      )
+    }
+
     const { searchParams } = new URL(request.url)
-    const userId = searchParams.get('userId') || 'default-user' // TODO: Replace with actual user ID
+    const userId = searchParams.get('userId')
     const limit = parseInt(searchParams.get('limit') || '10')
     const offset = parseInt(searchParams.get('offset') || '0')
 
-    const audits = await db.audit.findMany({
-      where: { userId },
-      select: {
-        id: true,
-        overallScore: true,
-        riskLevel: true,
-        status: true,
-        createdAt: true,
-        completedAt: true,
-        contract: {
-          select: {
-            name: true
-          }
-        },
-        vulnerabilities: {
-          select: {
-            severity: true,
-            title: true,
-            category: true
-          },
-          orderBy: { severity: 'desc' }
-        },
-        _count: {
-          select: {
-            vulnerabilities: true
-          }
-        }
-      },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-      skip: offset,
+    // Verify user can access these audits
+    if (userId !== session.user.id) {
+      return NextResponse.json(
+        { error: 'Forbidden' },
+        { status: 403 }
+      )
+    }
+
+    // Get audits with contract information
+    const audits = await Audit.find({ userId })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .skip(offset)
+      .lean()
+
+    // Get contract names for each audit
+    const auditIds = audits.map(audit => (audit as any)._id.toString())
+    const contracts = await Contract.find({ 
+      _id: { $in: audits.map(audit => (audit as any).contractId) } 
+    }).lean()
+    
+    // Get vulnerabilities for each audit
+    const vulnerabilities = await Vulnerability.find({ 
+      auditId: { $in: auditIds } 
+    }).sort({ severity: -1 }).lean()
+
+    // Create contract lookup map
+    const contractMap = new Map(contracts.map(contract => [(contract as any)._id.toString(), contract]))
+    
+    // Group vulnerabilities by audit
+    const vulnerabilityMap = new Map()
+    vulnerabilities.forEach(vuln => {
+      const auditId = vuln.auditId
+      if (!vulnerabilityMap.has(auditId)) {
+        vulnerabilityMap.set(auditId, [])
+      }
+      vulnerabilityMap.get(auditId).push(vuln)
     })
 
-    const total = await db.audit.count({
-      where: { userId }
-    })
+    const total = await Audit.countDocuments({ userId })
 
     // Calculate statistics
-    const stats = await db.audit.aggregate({
-      where: { userId },
-      _avg: {
-        overallScore: true
-      },
-      _count: {
-        id: true
+    const statsAggregation = await Audit.aggregate([
+      { $match: { userId } },
+      {
+        $group: {
+          _id: null,
+          totalAudits: { $sum: 1 },
+          averageScore: { $avg: '$overallScore' },
+          contractsSecured: {
+            $sum: {
+              $cond: [{ $gte: ['$overallScore', 70] }, 1, 0]
+            }
+          }
+        }
       }
-    })
+    ])
 
-    const vulnerabilityStats = await db.vulnerability.groupBy({
-      by: ['severity'],
-      where: {
-        audit: {
-          userId
+    const vulnerabilityStats = await Vulnerability.aggregate([
+      {
+        $lookup: {
+          from: 'audits',
+          localField: 'auditId',
+          foreignField: '_id',
+          as: 'audit'
         }
       },
-      _count: {
-        id: true
+      { $unwind: '$audit' },
+      { $match: { 'audit.userId': userId } },
+      {
+        $group: {
+          _id: '$severity',
+          count: { $sum: 1 }
+        }
       }
-    })
+    ])
 
-    const criticalCount = vulnerabilityStats.find(s => s.severity === 'CRITICAL')?._count.id || 0
-    const highCount = vulnerabilityStats.find(s => s.severity === 'HIGH')?._count.id || 0
+    const stats = statsAggregation[0] || { totalAudits: 0, averageScore: 0, contractsSecured: 0 }
+    const criticalCount = vulnerabilityStats.find(s => s._id === 'CRITICAL')?.count || 0
+    const highCount = vulnerabilityStats.find(s => s._id === 'HIGH')?.count || 0
 
     return NextResponse.json({
-      audits: audits.map(audit => ({
-        id: audit.id,
-        contractName: audit.contract.name,
-        overallScore: audit.overallScore,
-        riskLevel: audit.riskLevel,
-        status: audit.status,
-        createdAt: audit.createdAt,
-        completedAt: audit.completedAt,
-        vulnerabilityCount: audit._count.vulnerabilities,
-        vulnerabilities: audit.vulnerabilities.map(vuln => ({
-          severity: vuln.severity,
-          title: vuln.title,
-          category: vuln.category
-        }))
-      })),
+      audits: audits.map(audit => {
+        const auditId = (audit as any)._id.toString()
+        const contract = contractMap.get((audit as any).contractId)
+        const auditVulns = vulnerabilityMap.get(auditId) || []
+        
+        return {
+          id: auditId,
+          contractName: contract?.name || 'Unknown Contract',
+          overallScore: audit.overallScore,
+          riskLevel: audit.riskLevel,
+          status: audit.status,
+          createdAt: audit.createdAt,
+          completedAt: audit.completedAt,
+          vulnerabilityCount: auditVulns.length,
+          vulnerabilities: auditVulns.map((vuln: any) => ({
+            severity: vuln.severity,
+            title: vuln.title,
+            category: vuln.category
+          }))
+        }
+      }),
       stats: {
-        totalAudits: stats._count.id,
-        averageScore: Math.round(stats._avg.overallScore || 0),
+        totalAudits: stats.totalAudits,
+        averageScore: Math.round(stats.averageScore || 0),
         criticalVulnerabilities: criticalCount,
         highVulnerabilities: highCount,
-        contractsSecured: audits.filter(a => a.overallScore && a.overallScore >= 70).length
+        contractsSecured: stats.contractsSecured
       },
       pagination: {
         total,
