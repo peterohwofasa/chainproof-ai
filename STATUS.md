@@ -59,8 +59,8 @@
    - Add your current IP: Check "What's my IP?" and add it
    - OR Add `0.0.0.0/0` for testing (allows all IPs)
 4. **Database Access**:
-   - Verify user `peterohwofasa204_db_user` exists
-   - Ensure password is correct: `Sod1HilAYYntinCt`
+   - Verify database user exists
+   - Ensure password is correct (check your .env.local)
    - Grant "Atlas Admin" or "readWrite" permissions
 5. **Get Fresh Connection String**:
    - Click "Connect" → "Connect your application"
@@ -138,10 +138,10 @@ vercel --prod
 
 ### ✅ Already Configured
 - ✅ `NEXTAUTH_URL` = http://localhost:3000
-- ✅ `NEXTAUTH_SECRET` = 216573a10f38ca021f9151e130e52df9ec528b6b7234667bd34e94a0969ae432
-- ✅ `JWT_SECRET` = 3df6395c8d07ee513c260d6d6d1eb8de84b37e40278d8ad8e9d6ee6f23742661
-- ✅ `SESSION_SECRET` = f7bda180e78929f7fc706169c09533712d6323781a7a65d7b978f5602aae81dc
-- ✅ `CSRF_SECRET` = f6c922f3138dc796075ffbc107b41e9fa40170228bd7d9616f7da1c417e9f5e5
+- ✅ `NEXTAUTH_SECRET` = [CONFIGURED - 32-character secret]
+- ✅ `JWT_SECRET` = [CONFIGURED - 32-character secret]
+- ✅ `SESSION_SECRET` = [CONFIGURED - 32-character secret]
+- ✅ `CSRF_SECRET` = [CONFIGURED - 32-character secret]
 
 ### ⚠️ Needs Fixing
 - ⚠️ `MONGODB_URI` = Currently failing to connect
