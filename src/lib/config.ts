@@ -7,7 +7,8 @@ dotenvConfig({ path: '.env' });
 // Environment configuration with validation
 const envSchema = z.object({
   // Database
-  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+  MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
+  DATABASE_URL: z.string().optional(), // Legacy support
   
   // NextAuth
   NEXTAUTH_URL: z.string().url().optional(),
@@ -81,7 +82,8 @@ function validateEnv() {
     if (process.env.NODE_ENV === 'development') {
       console.warn('⚠️ Using default development values for missing environment variables');
       return {
-        DATABASE_URL: process.env.DATABASE_URL || 'file:./db/dev.db',
+        MONGODB_URI: process.env.MONGODB_URI || process.env.DATABASE_URL || 'mongodb://localhost:27017/chainproof',
+        DATABASE_URL: process.env.DATABASE_URL || process.env.MONGODB_URI,
         NEXTAUTH_URL: process.env.NEXTAUTH_URL,
         NEXTAUTH_SECRET: process.env.NEXTAUTH_SECRET || 'dev-secret-key-change-in-production',
         JWT_SECRET: process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production',

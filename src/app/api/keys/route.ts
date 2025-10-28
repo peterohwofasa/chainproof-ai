@@ -5,6 +5,7 @@ import { apiKeyRotationService } from '@/lib/api-key-rotation'
 import { logger } from '@/lib/logger'
 import { withErrorHandler, ValidationError, AuthenticationError } from '@/lib/error-handler'
 import { withCSRFProtection } from '@/lib/csrf-protection'
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils'
 
 /**
  * GET /api/keys - Get all API keys for authenticated user
@@ -13,14 +14,20 @@ export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
     }
 
-    const apiKeys = await apiKeyRotationService.getUserAPIKeys(session.user.id)
+    // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+    const userId = await getAuthenticatedUserId(request)
+    if (!userId) {
+      return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 })
+    }
+
+    const apiKeys = await apiKeyRotationService.getUserAPIKeys(userId)
     
     // Remove sensitive data before sending to client
     const sanitizedKeys = apiKeys.map(key => ({
@@ -36,7 +43,7 @@ export async function GET(request: NextRequest) {
     }))
 
     logger.info('API keys retrieved', {
-      userId: session.user.id,
+      userId,
       keyCount: sanitizedKeys.length
     })
 
@@ -60,11 +67,17 @@ export const POST = withCSRFProtection(async (request: NextRequest) => {
   try {
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
+    }
+
+    // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+    const userId = await getAuthenticatedUserId(request)
+    if (!userId) {
+      return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 })
     }
 
     const body = await request.json()
@@ -95,13 +108,13 @@ export const POST = withCSRFProtection(async (request: NextRequest) => {
     }
 
     const { key, keyData } = await apiKeyRotationService.createAPIKey(
-      session.user.id,
+      userId,
       name,
       permissions
     )
 
     logger.info('API key created', {
-      userId: session.user.id,
+      userId,
       keyId: keyData.id,
       name,
       permissions

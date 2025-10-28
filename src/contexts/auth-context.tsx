@@ -1,6 +1,7 @@
 'use client'
 
 import React, { createContext, useContext, useEffect, useState } from 'react'
+import { useSession, signOut } from 'next-auth/react'
 import { toast } from 'sonner'
 
 interface User {
@@ -8,6 +9,8 @@ interface User {
   email: string
   name?: string
   walletAddress?: string
+  isBaseAccount?: boolean
+  onlineStatus?: 'online' | 'offline' | 'away'
   createdAt: string
   subscription?: {
     plan: string
@@ -23,9 +26,9 @@ interface User {
 interface AuthContextType {
   user: User | null
   isLoading: boolean
-  login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string, name?: string) => Promise<void>
-  loginWithWallet: (address: string, signature: string, message: string) => Promise<void>
+  isOnline: boolean
+  canSaveOrExport: boolean
+  updateOnlineStatus: (status: 'online' | 'offline' | 'away') => Promise<void>
   logout: () => void
   refreshUser: () => Promise<void>
 }
@@ -33,127 +36,97 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const { data: session, status } = useSession()
   const [user, setUser] = useState<User | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const [isOnline, setIsOnline] = useState(false)
+
+  const isLoading = status === 'loading'
 
   useEffect(() => {
-    const token = localStorage.getItem('auth_token')
-    if (token) {
-      refreshUser()
+    if (session?.user) {
+      // Convert NextAuth session to our User type
+      const sessionUser: User = {
+        id: session.user.id,
+        email: session.user.email,
+        name: session.user.name || undefined,
+        walletAddress: session.user.walletAddress,
+        isBaseAccount: session.user.isBaseAccount || false,
+        onlineStatus: session.user.onlineStatus || 'offline',
+        createdAt: new Date().toISOString(), // This should come from the database
+        auditCount: 0 // This should come from the database
+      }
+      setUser(sessionUser)
+      setIsOnline(session.user.onlineStatus === 'online')
+      
+      // Update online status when user logs in
+      if (session.user.onlineStatus !== 'online') {
+        updateOnlineStatus('online')
+      }
     } else {
-      setIsLoading(false)
+      setUser(null)
+      setIsOnline(false)
     }
-  }, [])
+  }, [session])
 
   const refreshUser = async () => {
     try {
-      const token = localStorage.getItem('auth_token')
-      if (!token) {
-        setIsLoading(false)
-        return
-      }
+      if (!session?.user?.id) return
 
-      const response = await fetch('/api/auth/me', {
+      const response = await fetch('/api/user/profile')
+      if (response.ok) {
+        const data = await response.json()
+        setUser(data.user)
+      }
+    } catch (error) {
+      console.error('Failed to refresh user:', error)
+    }
+  }
+
+
+
+
+
+  const updateOnlineStatus = async (status: 'online' | 'offline' | 'away') => {
+    try {
+      const response = await fetch('/api/user/status', {
+        method: 'PUT',
         headers: {
-          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ onlineStatus: status }),
       })
 
       if (response.ok) {
         const data = await response.json()
-        setUser(data.user)
+        setIsOnline(data.onlineStatus === 'online')
+        
+        // Update user object with new status
+        if (user) {
+          setUser({
+            ...user,
+            onlineStatus: data.onlineStatus
+          })
+        }
       } else {
-        localStorage.removeItem('auth_token')
-        setUser(null)
+        console.error('Failed to update online status')
       }
     } catch (error) {
-      console.error('Failed to refresh user:', error)
-      localStorage.removeItem('auth_token')
+      console.error('Error updating online status:', error)
+    }
+  }
+
+  const logout = async () => {
+    try {
+      // Update status to offline before signing out
+      await updateOnlineStatus('offline')
+      await signOut({ redirect: false })
       setUser(null)
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const login = async (email: string, password: string) => {
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      })
-
-      const data = await response.json()
-
-      if (response.ok) {
-        localStorage.setItem('auth_token', data.token)
-        setUser(data.user)
-        toast.success('Login successful!')
-      } else {
-        throw new Error(data.error || 'Login failed')
-      }
+      setIsOnline(false)
+      toast.success('Logged out successfully')
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Login failed')
-      throw error
+      console.error('Logout error:', error)
+      toast.error('Error during logout')
     }
-  }
-
-  const register = async (email: string, password: string, name?: string) => {
-    try {
-      const response = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password, name }),
-      })
-
-      const data = await response.json()
-
-      if (response.ok) {
-        localStorage.setItem('auth_token', data.token)
-        setUser(data.user)
-        toast.success('Registration successful!')
-      } else {
-        throw new Error(data.error || 'Registration failed')
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Registration failed')
-      throw error
-    }
-  }
-
-  const loginWithWallet = async (address: string, signature: string, message: string) => {
-    try {
-      const response = await fetch('/api/auth/wallet', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ address, signature, message }),
-      })
-
-      const data = await response.json()
-
-      if (response.ok) {
-        localStorage.setItem('auth_token', data.token)
-        setUser(data.user)
-        toast.success('Wallet connected successfully!')
-      } else {
-        throw new Error(data.error || 'Wallet connection failed')
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Wallet connection failed')
-      throw error
-    }
-  }
-
-  const logout = () => {
-    localStorage.removeItem('auth_token')
-    setUser(null)
-    toast.success('Logged out successfully')
   }
 
   return (
@@ -161,9 +134,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       value={{
         user,
         isLoading,
-        login,
-        register,
-        loginWithWallet,
+        isOnline,
+        canSaveOrExport: true, // All authenticated users can save/export
+        updateOnlineStatus,
         logout,
         refreshUser,
       }}

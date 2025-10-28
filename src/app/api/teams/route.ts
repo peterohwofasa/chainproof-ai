@@ -7,6 +7,7 @@ import { TeamMember } from '@/models/TeamMember'
 import { Project } from '@/models/Project'
 import { Activity } from '@/models/Activity'
 import { User } from '@/models/User'
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils'
 import { SecurityUtils } from '@/lib/security'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -16,16 +17,22 @@ export async function GET(request: NextRequest) {
     
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
     }
 
+    // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+    const userId = await getAuthenticatedUserId(request)
+    if (!userId) {
+      return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 })
+    }
+
     // Get team members for the user
     const teamMembers = await TeamMember.find({
-      userId: session.user.id
+      userId
     }).select('teamId role').lean()
 
     const teamIds = teamMembers.map(member => member.teamId)
@@ -33,7 +40,7 @@ export async function GET(request: NextRequest) {
     // Get teams where user is owner or member
     const teams = await Team.find({
       $or: [
-        { ownerId: session.user.id },
+        { ownerId: userId },
         { _id: { $in: teamIds } }
       ]
     })
@@ -118,11 +125,17 @@ export async function POST(request: NextRequest) {
     
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
+    }
+
+    // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+    const userId = await getAuthenticatedUserId(request)
+    if (!userId) {
+      return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 })
     }
 
     const body = await request.json()
@@ -155,19 +168,19 @@ export async function POST(request: NextRequest) {
     const team = await Team.create({
       name: sanitizedName,
       description: sanitizedDescription,
-      ownerId: session.user.id
+      ownerId: userId
     })
 
     // Add owner as team member
     await TeamMember.create({
       teamId: team._id,
-      userId: session.user.id,
+      userId,
       role: 'OWNER'
     })
 
     // Create activity log
     await Activity.create({
-      userId: session.user.id,
+      userId,
       action: 'TEAM_CREATED',
       target: team._id.toString(),
       metadata: JSON.stringify({ teamName: team.name })

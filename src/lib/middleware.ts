@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getToken } from 'next-auth/jwt'
 import { validateRateLimit, sanitizeInput } from './validations'
-import { redisRateLimiter } from './rate-limiter-redis'
+import inMemoryRateLimiter from './rate-limiter-redis'
 import { logger } from './logger'
 
 // Rate limiting store (fallback for when Redis is unavailable)
@@ -17,7 +17,35 @@ export async function withAuth(request: NextRequest) {
     )
   }
   
-  return null // Continue with the request
+  // UNIVERSAL WALLET ACCESS - Allow ANY wallet address to access ALL features
+  // No restrictions whatsoever for wallet users
+  if (token.walletAddress) {
+    logger.info('Wallet user authenticated - UNIVERSAL ACCESS GRANTED', {
+      userId: token.id,
+      walletAddress: token.walletAddress,
+      accessLevel: 'FULL',
+      restrictions: 'NONE'
+    });
+    return null // Continue with the request - NO barriers for ANY wallet users
+  }
+  
+  // Also allow Base account users (legacy support)
+  if (token.isBaseAccount) {
+    logger.info('Base account user authenticated - FULL ACCESS GRANTED', {
+      userId: token.id,
+      isBaseAccount: token.isBaseAccount,
+      accessLevel: 'FULL'
+    });
+    return null // Continue with the request
+  }
+  
+  // Allow all authenticated users - no restrictions
+  logger.info('Authenticated user - FULL ACCESS GRANTED', {
+    userId: token.id,
+    accessLevel: 'FULL'
+  });
+  
+  return null // Continue with the request - no barriers for any authenticated user
 }
 
 export async function withRateLimit(
@@ -27,8 +55,8 @@ export async function withRateLimit(
   windowMs: number = 60000 // 1 minute
 ) {
   try {
-    // Try Redis first
-    const result = await redisRateLimiter.checkLimitByIdentifier(identifier, limit, Math.floor(windowMs / 1000));
+    // Use in-memory rate limiter
+    const result = await inMemoryRateLimiter.checkLimitByIdentifier(identifier, limit, Math.floor(windowMs / 1000));
     
     if (!result.allowed) {
       return NextResponse.json(

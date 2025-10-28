@@ -9,12 +9,12 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "mongodb"
   url      = env("DATABASE_URL")
 }
 
 model User {
-  id                String    @id @default(cuid())
+  id                String    @id @default(auto()) @map("_id") @db.ObjectId
   email             String    @unique
   name              String?
   password          String?
@@ -32,8 +32,14 @@ model User {
   passwordResetToken  String?
   passwordResetExpires DateTime?
   
+  // Base account fields
+  isBaseAccount     Boolean   @default(false)
+  baseAccountData   Json?     // Store Base account specific data (signature, message, etc.)
+  onlineStatus      String?   @default("offline") // "online", "offline", "away"
+  lastSeenAt        DateTime?
+  
   // Team fields
-  teamId            String?
+  teamId            String?   @db.ObjectId
   role              TeamRole? @default(MEMBER)
   
   audits        Audit[]
@@ -48,21 +54,24 @@ model User {
   payments       Payment[]
   projects       Project[]
   
-  team           Team?       @relation(fields: [teamId], references: [id])
+  team           Team?       @relation(fields: [teamId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   
   // Performance indexes
   @@index([emailVerified])
   @@index([teamId])
   @@index([createdAt])
   @@index([lastLoginAt])
+  @@index([isBaseAccount])
+  @@index([onlineStatus])
+  @@index([lastSeenAt])
 }
 
 model Team {
-  id          String   @id @default(cuid())
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
   name        String
   description String?
   avatar      String?
-  ownerId     String
+  ownerId     String   @db.ObjectId
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
@@ -76,9 +85,9 @@ model Team {
 }
 
 model TeamMember {
-  id     String   @id @default(cuid())
-  teamId String
-  userId String
+  id     String   @id @default(auto()) @map("_id") @db.ObjectId
+  teamId String   @db.ObjectId
+  userId String   @db.ObjectId
   role   TeamRole @default(DEVELOPER)
   joinedAt DateTime @default(now())
   
@@ -91,29 +100,28 @@ model TeamMember {
 }
 
 model TeamInvitation {
-  id     String   @id @default(cuid())
-  teamId String
+  id     String   @id @default(auto()) @map("_id") @db.ObjectId
+  teamId String   @db.ObjectId
   email  String
   role   TeamRole @default(DEVELOPER)
   token  String   @unique
   acceptedAt DateTime?
   expiresAt DateTime
   createdAt DateTime @default(now())
-  invitedBy String
+  invitedBy String   @db.ObjectId
   
   team   Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
   
   @@index([teamId])
   @@index([email])
-  @@index([token])
 }
 
 model Project {
-  id          String   @id @default(cuid())
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
   name        String
   description String?
-  userId      String
-  teamId      String?
+  userId      String   @db.ObjectId
+  teamId      String?  @db.ObjectId
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
@@ -131,8 +139,8 @@ model Project {
 }
 
 model Notification {
-  id        String           @id @default(cuid())
-  userId    String
+  id        String           @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String           @db.ObjectId
   type      NotificationType
   title     String
   message   String
@@ -152,8 +160,8 @@ model Notification {
 }
 
 model Activity {
-  id        String       @id @default(cuid())
-  userId    String
+  id        String       @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String       @db.ObjectId
   action    ActivityType
   target    String?      // Target entity ID
   metadata  String?      // JSON metadata
@@ -169,8 +177,8 @@ model Activity {
 }
 
 model Account {
-  id                String  @id @default(cuid())
-  userId            String
+  id                String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String  @db.ObjectId
   type              String
   provider          String
   providerAccountId String
@@ -188,14 +196,15 @@ model Account {
 }
 
 model Session {
-  id           String   @id @default(cuid())
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
   sessionToken String   @unique
-  userId       String
+  userId       String   @db.ObjectId
   expires      DateTime
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model VerificationToken {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
   identifier String
   token      String   @unique
   expires    DateTime
@@ -204,7 +213,7 @@ model VerificationToken {
 }
 
 model Contract {
-  id          String   @id @default(cuid())
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
   address     String?
   name        String
   sourceCode  String
@@ -212,7 +221,7 @@ model Contract {
   abi         String?
   compilerVersion String?
   optimizationEnabled Boolean? @default(false)
-  projectId   String?
+  projectId   String?  @db.ObjectId
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   
@@ -223,10 +232,10 @@ model Contract {
 }
 
 model Audit {
-  id              String   @id @default(cuid())
-  userId          String
-  contractId      String
-  projectId       String?
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId          String   @db.ObjectId
+  contractId      String   @db.ObjectId
+  projectId       String?  @db.ObjectId
   status          AuditStatus @default(PENDING)
   auditType       AuditType @default(STANDARD)
   overallScore    Int?     // 0-100 security score
@@ -267,8 +276,8 @@ model Audit {
 }
 
 model Vulnerability {
-  id              String   @id @default(cuid())
-  auditId         String
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  auditId         String   @db.ObjectId
   title           String
   description     String
   severity        Severity
@@ -297,8 +306,8 @@ model Vulnerability {
 }
 
 model AuditReport {
-  id              String   @id @default(cuid())
-  auditId         String
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  auditId         String   @db.ObjectId
   reportType      ReportType @default(FULL)
   content         String   // JSON content of the report
   ipfsHash        String?  // IPFS hash for decentralized storage
@@ -311,8 +320,8 @@ model AuditReport {
 }
 
 model ApiKey {
-  id          String   @id @default(cuid())
-  userId      String
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
   name        String
   key         String   @unique
   isActive    Boolean  @default(true)
@@ -331,8 +340,8 @@ model ApiKey {
 }
 
 model Subscription {
-  id              String   @id @default(cuid())
-  userId          String
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId          String   @db.ObjectId
   plan            SubscriptionPlan @default(FREE)
   status          SubscriptionStatus @default(ACTIVE)
   creditsRemaining Int     @default(0)
@@ -353,14 +362,18 @@ model Subscription {
 }
 
 model Payment {
-  id              String   @id @default(cuid())
-  userId          String
-  auditId         String?
-  subscriptionId  String?
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId          String   @db.ObjectId
+  auditId         String?  @db.ObjectId
+  subscriptionId  String?  @db.ObjectId
   amount          Float
   currency        String   @default("USD")
   status          PaymentStatus @default(PENDING)
   stripePaymentId String?  @unique
+  basePaymentId   String?  @unique
+  transactionHash String?
+  paymentMethod   PaymentMethod @default(STRIPE)
+  metadata        String?  // JSON metadata
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   
@@ -376,6 +389,8 @@ model Payment {
   @@index([createdAt])
   @@index([userId, status])
   @@index([status, createdAt])
+  @@index([transactionHash])
+  @@index([paymentMethod])
 }
 
 enum TeamRole {
@@ -465,16 +480,15 @@ enum PaymentStatus {
 }
 
 enum PaymentMethod {
-  CDP_WALLET
   BASE_PAY
   STRIPE
 }
 
 model AuditLog {
-  id          String   @id @default(cuid())
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
   eventType   String   // AuditEventType enum values
   severity    String   // AuditSeverity enum values
-  userId      String?
+  userId      String?  @db.ObjectId
   sessionId   String?
   ipAddress   String?
   userAgent   String?

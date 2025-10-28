@@ -1,5 +1,5 @@
 # ChainProof AI Production Deployment Script (Windows PowerShell)
-# This script sets up the production environment with PostgreSQL and Redis
+# This script sets up the production environment with MongoDB and Redis
 
 param(
     [switch]$SkipBuild,
@@ -37,7 +37,7 @@ Write-Host "[OK] Docker Compose is available" -ForegroundColor Green
 
 # Create necessary directories
 Write-Host "[INFO] Creating necessary directories..." -ForegroundColor Yellow
-$directories = @("data\postgres", "data\redis", "logs", "backups")
+$directories = @("data\mongodb", "data\redis", "logs", "backups")
 foreach ($dir in $directories) {
     if (!(Test-Path $dir)) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
@@ -74,20 +74,22 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# Wait for PostgreSQL to be ready
-Write-Host "[WAIT] Waiting for PostgreSQL to be ready..." -ForegroundColor Yellow
+# Wait for MongoDB to be ready
+Write-Host "[WAIT] Waiting for MongoDB to be ready..." -ForegroundColor Yellow
 Start-Sleep -Seconds 10
 
-# Run database migrations
-Write-Host "[DB] Running database migrations..." -ForegroundColor Yellow
-docker-compose -f docker-compose.production.yml --env-file .env.production exec app npx prisma migrate deploy
+# Test MongoDB connection
+Write-Host "[DB] Testing MongoDB connection..." -ForegroundColor Yellow
+$mongoTestScript = @"
+const mongoose = require('mongoose');
+mongoose.connect(process.env.MONGODB_URI || process.env.DATABASE_URL)
+  .then(() => { console.log('✅ MongoDB connected successfully'); process.exit(0); })
+  .catch(err => { console.error('❌ MongoDB connection failed:', err); process.exit(1); });
+"@
+docker-compose -f docker-compose.production.yml --env-file .env.production exec app node -e $mongoTestScript
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[WARNING] Database migrations failed. This might be expected on first run." -ForegroundColor Yellow
+    Write-Host "[WARNING] MongoDB connection test failed. Check your connection string." -ForegroundColor Yellow
 }
-
-# Generate Prisma client
-Write-Host "[PRISMA] Generating Prisma client..." -ForegroundColor Yellow
-docker-compose -f docker-compose.production.yml --env-file .env.production exec app npx prisma generate
 
 # Check health status
 Write-Host "[HEALTH] Checking application health..." -ForegroundColor Yellow
@@ -127,14 +129,14 @@ Write-Host ""
 Write-Host "Next Steps:" -ForegroundColor Cyan
 Write-Host "1. Application is running at: http://localhost:3000" -ForegroundColor White
 Write-Host "2. Health check endpoint: http://localhost:3000/api/health" -ForegroundColor White
-Write-Host "3. PostgreSQL is running on port 5432" -ForegroundColor White
+Write-Host "3. MongoDB is running on port 27017" -ForegroundColor White
 Write-Host "4. Redis is running on port 6379" -ForegroundColor White
 Write-Host ""
 Write-Host "Useful Commands:" -ForegroundColor Cyan
 Write-Host "- View logs: docker-compose -f docker-compose.production.yml --env-file .env.production logs -f" -ForegroundColor White
 Write-Host "- Stop services: docker-compose -f docker-compose.production.yml --env-file .env.production down" -ForegroundColor White
 Write-Host "- Restart services: docker-compose -f docker-compose.production.yml --env-file .env.production restart" -ForegroundColor White
-Write-Host "- Database backup: docker-compose -f docker-compose.production.yml exec postgres pg_dump -U chainproof_user chainproof_db > backup.sql" -ForegroundColor White
+Write-Host "- Database backup: docker-compose -f docker-compose.production.yml exec mongodb mongodump --db chainproof_db --out /data/backup" -ForegroundColor White
 Write-Host ""
 Write-Host "Security Reminders:" -ForegroundColor Yellow
 Write-Host "- Change default passwords in .env.production" -ForegroundColor White

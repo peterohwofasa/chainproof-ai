@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server';
 import { config } from './config';
 import { logger } from './logger';
 import { RateLimitError } from './error-handler';
-import { redisRateLimiter, withRedisRateLimit, withRedisAuthRateLimit, withRedisAuditRateLimit, withRedisUploadRateLimit } from './rate-limiter-redis';
+import inMemoryRateLimiter from './rate-limiter-redis';
 
 // Define a default config in case import fails
 const defaultConfig = {
@@ -66,15 +66,15 @@ class RateLimiter {
     endpoint?: string
   ): Promise<{ allowed: boolean; remaining: number; resetTime: number }> {
     try {
-      // Try Redis first
-      return await redisRateLimiter.checkLimit(request, customLimit, customWindow, endpoint);
+      // Use in-memory rate limiter
+      return await inMemoryRateLimiter.checkLimit(request, customLimit, customWindow, endpoint);
     } catch (error) {
       if (error instanceof RateLimitError) {
         throw error;
       }
       
-      // Fallback to in-memory if Redis fails
-      logger.warn('Redis rate limiter failed, falling back to in-memory', { error });
+      // Fallback to basic in-memory if the new limiter fails
+      logger.warn('In-memory rate limiter failed, falling back to basic implementation', { error });
       return this.checkLimit(request, customLimit, customWindow, endpoint);
     }
   }
@@ -133,36 +133,36 @@ class RateLimiter {
   // Different rate limits for different endpoints
   async checkAuthLimitRedis(request: NextRequest): Promise<{ allowed: boolean; remaining: number; resetTime: number }> {
     try {
-      return await redisRateLimiter.checkAuthLimit(request);
+      return await inMemoryRateLimiter.checkAuthLimit(request);
     } catch (error) {
       if (error instanceof RateLimitError) {
         throw error;
       }
-      logger.warn('Redis auth rate limiter failed, falling back to in-memory', { error });
+      logger.warn('In-memory auth rate limiter failed, falling back to basic implementation', { error });
       return this.checkAuthLimit(request);
     }
   }
 
   async checkAuditLimitRedis(request: NextRequest): Promise<{ allowed: boolean; remaining: number; resetTime: number }> {
     try {
-      return await redisRateLimiter.checkAuditLimit(request);
+      return await inMemoryRateLimiter.checkAuditLimit(request);
     } catch (error) {
       if (error instanceof RateLimitError) {
         throw error;
       }
-      logger.warn('Redis audit rate limiter failed, falling back to in-memory', { error });
+      logger.warn('In-memory audit rate limiter failed, falling back to basic implementation', { error });
       return this.checkAuditLimit(request);
     }
   }
 
   async checkUploadLimitRedis(request: NextRequest): Promise<{ allowed: boolean; remaining: number; resetTime: number }> {
     try {
-      return await redisRateLimiter.checkUploadLimit(request);
+      return await inMemoryRateLimiter.checkUploadLimit(request);
     } catch (error) {
       if (error instanceof RateLimitError) {
         throw error;
       }
-      logger.warn('Redis upload rate limiter failed, falling back to in-memory', { error });
+      logger.warn('In-memory upload rate limiter failed, falling back to basic implementation', { error });
       return this.checkUploadLimit(request);
     }
   }
@@ -235,8 +235,7 @@ class RateLimiter {
 // Singleton instance
 export const rateLimiter = new RateLimiter();
 
-// Export Redis rate limiting functions for direct use
-export { withRedisRateLimit, withRedisAuthRateLimit, withRedisAuditRateLimit, withRedisUploadRateLimit };
+// Redis functions have been removed - using in-memory rate limiter instead
 
 // Redis-first middleware function for API routes
 export function withRateLimitRedis(

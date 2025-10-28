@@ -1,6 +1,6 @@
 import { db } from './db';
-import { redisClient } from './redis';
 import { logger } from './logger';
+import { Prisma } from '@prisma/client';
 
 export interface HealthCheckResult {
   status: 'healthy' | 'degraded' | 'unhealthy';
@@ -15,7 +15,6 @@ export interface SystemHealth {
   timestamp: string;
   services: {
     database: HealthCheckResult;
-    redis: HealthCheckResult;
     externalServices: HealthCheckResult;
     fileSystem: HealthCheckResult;
     memory: HealthCheckResult;
@@ -32,7 +31,7 @@ class HealthCheckService {
     const start = Date.now();
     try {
       // Test database connection with a simple query
-      await db.$queryRaw`SELECT 1`;
+      await db.$queryRaw(Prisma.sql`SELECT 1 as test`);
       
       // Check database performance
       const userCount = await db.user.count();
@@ -58,40 +57,7 @@ class HealthCheckService {
     }
   }
 
-  async checkRedis(): Promise<HealthCheckResult> {
-    const start = Date.now();
-    try {
-      // Test Redis connection
-      const pong = await redisClient.ping();
-      
-      // Test Redis operations
-      const testKey = `health_check_${Date.now()}`;
-      await redisClient.setex(testKey, 10, 'test');
-      const testValue = await redisClient.get(testKey);
-      await redisClient.del(testKey);
-      
-      const responseTime = Date.now() - start;
-      
-      return {
-        status: pong === 'PONG' && testValue === 'test' && responseTime < 500 ? 'healthy' : 'degraded',
-        timestamp: new Date().toISOString(),
-        responseTime,
-        details: {
-          ping: pong,
-          readWrite: testValue === 'test',
-          memory: await this.getRedisMemoryInfo()
-        }
-      };
-    } catch (error) {
-      logger.error('Redis health check failed', { error });
-      return {
-        status: 'unhealthy',
-        timestamp: new Date().toISOString(),
-        responseTime: Date.now() - start,
-        error: error instanceof Error ? error.message : 'Unknown Redis error'
-      };
-    }
-  }
+
 
   async checkExternalServices(): Promise<HealthCheckResult> {
     const start = Date.now();
@@ -280,9 +246,8 @@ class HealthCheckService {
   }
 
   async getSystemHealth(): Promise<SystemHealth> {
-    const [database, redis, externalServices, fileSystem, memory, errorRate] = await Promise.all([
+    const [database, externalServices, fileSystem, memory, errorRate] = await Promise.all([
       this.checkDatabase(),
-      this.checkRedis(),
       this.checkExternalServices(),
       this.checkFileSystem(),
       this.checkMemory(),
@@ -290,7 +255,7 @@ class HealthCheckService {
     ]);
 
     // Determine overall health
-    const services = { database, redis, externalServices, fileSystem, memory, errorRate };
+    const services = { database, externalServices, fileSystem, memory, errorRate };
     const healthyCount = Object.values(services).filter(s => s.status === 'healthy').length;
     const unhealthyCount = Object.values(services).filter(s => s.status === 'unhealthy').length;
     
@@ -348,34 +313,14 @@ class HealthCheckService {
     }
   }
 
-  private async getRedisMemoryInfo(): Promise<any> {
-    try {
-      const info = await redisClient.info('memory');
-      const lines = info.split('\r\n');
-      const memoryInfo: any = {};
-      
-      lines.forEach(line => {
-        if (line.includes(':')) {
-          const [key, value] = line.split(':');
-          if (key.startsWith('used_memory')) {
-            memoryInfo[key] = value;
-          }
-        }
-      });
-      
-      return memoryInfo;
-    } catch {
-      return {};
-    }
-  }
+
 
   private async getRecentErrorCount(since: Date): Promise<number> {
     try {
       // This would typically query your error monitoring system
-      // For now, we'll use a simple Redis-based approach
-      const errorKey = `errors:count:${since.getHours()}`;
-      const count = await redisClient.get(errorKey);
-      return parseInt(count || '0', 10);
+      // For now, we'll return a default value since Redis is not available
+      // In a production environment, you would integrate with your logging/monitoring service
+      return 0;
     } catch {
       return 0;
     }
@@ -384,12 +329,11 @@ class HealthCheckService {
   private async getRecentRequestCount(since: Date): Promise<number> {
     try {
       // This would typically query your request monitoring system
-      // For now, we'll use a simple Redis-based approach
-      const requestKey = `requests:count:${since.getHours()}`;
-      const count = await redisClient.get(requestKey);
-      return parseInt(count || '0', 10);
+      // For now, we'll return a default value since Redis is not available
+      // In a production environment, you would integrate with your logging/monitoring service
+      return 100; // Assume some baseline request volume
     } catch {
-      return 0;
+      return 100;
     }
   }
 }

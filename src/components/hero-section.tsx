@@ -334,7 +334,7 @@ export function DemoSection() {
                         </Link>
                       </Button>
                       <p className="text-sm text-gray-500 dark:text-gray-400 text-center">
-                        No signup required for demo • 7-day free trial available
+                        Connect your Base wallet to get started • Free trial available
                       </p>
                     </div>
                   </div>
@@ -416,7 +416,7 @@ export function PricingPreviewSection() {
                 </li>
               </ul>
               <Button className="w-full bg-green-600 hover:bg-green-700 text-white" asChild>
-                <Link href="/signup">Start Free Trial</Link>
+                <Link href="/login">Connect Base Wallet</Link>
               </Button>
             </CardContent>
           </Card>

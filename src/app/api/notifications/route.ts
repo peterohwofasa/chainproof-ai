@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { connectDB, Notification } from '@/models'
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils'
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,11 +10,17 @@ export async function GET(request: NextRequest) {
     
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
+    }
+
+    // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+    const userId = await getAuthenticatedUserId(request)
+    if (!userId) {
+      return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 })
     }
 
     const { searchParams } = new URL(request.url)
@@ -21,7 +28,7 @@ export async function GET(request: NextRequest) {
     const offset = parseInt(searchParams.get('offset') || '0')
 
     const notifications = await Notification.find({
-      userId: session.user.id
+      userId
     })
     .sort({ createdAt: -1 })
     .limit(limit)
@@ -38,7 +45,7 @@ export async function GET(request: NextRequest) {
     .lean()
 
     const totalCount = await Notification.countDocuments({
-      userId: session.user.id
+      userId
     })
 
     // Transform _id to id for frontend compatibility
@@ -72,11 +79,17 @@ export async function POST(request: NextRequest) {
     
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
+    }
+
+    // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+    const userId = await getAuthenticatedUserId(request)
+    if (!userId) {
+      return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 })
     }
 
     const body = await request.json()
@@ -90,7 +103,7 @@ export async function POST(request: NextRequest) {
     }
 
     const notification = await Notification.create({
-      userId: session.user.id,
+      userId,
       type,
       title,
       message,

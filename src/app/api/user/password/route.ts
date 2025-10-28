@@ -3,15 +3,31 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { connectDB, User } from '@/models'
 import { SecurityUtils } from '@/lib/security'
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils' // UNIVERSAL WALLET ACCESS
 
 export async function PUT(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
+      )
+    }
+
+    // Get user ID from wallet authentication
+    const userId = await getAuthenticatedUserId(request)
+
+    // Connect to MongoDB first to check user type
+    await connectDB()
+
+    // Check if user is a wallet user (wallet users don't have passwords)
+    const userCheck = await User.findById(userId).select('walletAddress').lean()
+    if (userCheck?.walletAddress) {
+      return NextResponse.json(
+        { error: 'Wallet users cannot change passwords. Use your wallet for authentication.' },
+        { status: 400 }
       )
     }
 
@@ -33,11 +49,8 @@ export async function PUT(request: NextRequest) {
       )
     }
 
-    // Connect to MongoDB
-    await connectDB()
-
-    // Get current user with password
-    const user = await User.findById(session.user.id)
+    // Get current user with password (already connected to MongoDB above)
+    const user = await User.findById(userId)
       .select('password failedLoginAttempts lockedUntil')
       .lean()
 

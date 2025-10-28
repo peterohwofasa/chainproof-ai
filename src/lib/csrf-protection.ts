@@ -3,7 +3,43 @@ import { randomBytes, createHash, timingSafeEqual } from 'crypto'
 import { getServerSession } from 'next-auth'
 import { authOptions } from './auth'
 import { logger } from './logger'
-import { redisClient } from './redis'
+
+
+// In-memory cache for CSRF tokens when Redis is disabled
+class InMemoryCSRFCache {
+  private tokens = new Map<string, { hash: string; expiry: number }>()
+
+  set(sessionId: string, hashedToken: string, ttlSeconds: number): void {
+    const expiry = Date.now() + (ttlSeconds * 1000)
+    this.tokens.set(`csrf:${sessionId}`, { hash: hashedToken, expiry })
+  }
+
+  get(sessionId: string): string | null {
+    const entry = this.tokens.get(`csrf:${sessionId}`)
+    if (!entry) return null
+    
+    if (Date.now() > entry.expiry) {
+      this.tokens.delete(`csrf:${sessionId}`)
+      return null
+    }
+    
+    return entry.hash
+  }
+
+  delete(sessionId: string): void {
+    this.tokens.delete(`csrf:${sessionId}`)
+  }
+
+  // Clean expired tokens periodically
+  cleanup(): void {
+    const now = Date.now()
+    for (const [key, entry] of this.tokens.entries()) {
+      if (now > entry.expiry) {
+        this.tokens.delete(key)
+      }
+    }
+  }
+}
 
 export interface CSRFConfig {
   tokenLength: number
@@ -16,6 +52,7 @@ export interface CSRFConfig {
 
 export class CSRFProtection {
   private config: CSRFConfig
+  private inMemoryCache = new InMemoryCSRFCache()
 
   constructor(config?: Partial<CSRFConfig>) {
     this.config = {
@@ -27,6 +64,11 @@ export class CSRFProtection {
       secure: process.env.NODE_ENV === 'production',
       ...config
     }
+
+    // Clean up expired tokens every 5 minutes
+    setInterval(() => {
+      this.inMemoryCache.cleanup()
+    }, 5 * 60 * 1000)
   }
 
   /**
@@ -51,12 +93,16 @@ export class CSRFProtection {
     const hashedToken = this.hashToken(token)
     
     try {
-      // Store hashed token in Redis with expiration
-      await redisClient.setex(
-        `csrf:${sessionId}`,
-        this.config.sessionTimeout,
-        hashedToken
-      )
+      // Try Redis first, fallback to in-memory
+      if (redisClient.isReady()) {
+        await redisClient.setex(
+          `csrf:${sessionId}`,
+          this.config.sessionTimeout,
+          hashedToken
+        )
+      } else {
+        this.inMemoryCache.set(sessionId, hashedToken, this.config.sessionTimeout)
+      }
       
       logger.info('CSRF token generated', { sessionId })
       return token
@@ -75,7 +121,15 @@ export class CSRFProtection {
     }
 
     try {
-      const storedHash = await redisClient.get(`csrf:${sessionId}`)
+      let storedHash: string | null = null
+      
+      // Try Redis first, fallback to in-memory
+      if (redisClient.isReady()) {
+        storedHash = await redisClient.get(`csrf:${sessionId}`)
+      } else {
+        storedHash = this.inMemoryCache.get(sessionId)
+      }
+      
       if (!storedHash) {
         logger.warn('CSRF token not found in storage', { sessionId })
         return false
@@ -105,7 +159,12 @@ export class CSRFProtection {
    */
   async invalidateToken(sessionId: string): Promise<void> {
     try {
-      await redisClient.del(`csrf:${sessionId}`)
+      // Try Redis first, fallback to in-memory
+      if (redisClient.isReady()) {
+        await redisClient.del(`csrf:${sessionId}`)
+      } else {
+        this.inMemoryCache.delete(sessionId)
+      }
       logger.info('CSRF token invalidated', { sessionId })
     } catch (error) {
       logger.error('Failed to invalidate CSRF token', { error, sessionId })

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { csrfProtection } from '@/lib/csrf-protection'
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils'
 import { logger } from '@/lib/logger'
 import { handleApiError } from '@/lib/error-handler'
 
@@ -12,7 +13,7 @@ export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       logger.warn('CSRF token request without authentication')
       return NextResponse.json(
         { error: 'Authentication required' },
@@ -20,8 +21,12 @@ export async function GET(request: NextRequest) {
       )
     }
 
+    // Get authenticated user ID (supports both traditional and wallet users)
+    const userId = await getAuthenticatedUserId(request)
+    const isWalletUser = !session.user.id
+
     // Generate CSRF token for the user's session
-    const token = await csrfProtection.generateTokenForSession(session.user.id)
+    const token = await csrfProtection.generateTokenForSession(userId)
     
     // Create response with token
     const response = NextResponse.json({
@@ -34,7 +39,8 @@ export async function GET(request: NextRequest) {
     csrfProtection.setTokenCookie(response, token)
 
     logger.info('CSRF token generated for user', { 
-      userId: session.user.id,
+      userId,
+      isWalletUser,
       userAgent: request.headers.get('user-agent')
     })
 
@@ -52,12 +58,16 @@ export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
     }
+
+    // Get authenticated user ID (supports both traditional and wallet users)
+    const userId = await getAuthenticatedUserId(request)
+    const isWalletUser = !session.user.id
 
     const body = await request.json()
     const { token } = body
@@ -69,10 +79,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const isValid = await csrfProtection.validateToken(session.user.id, token)
+    const isValid = await csrfProtection.validateToken(userId, token)
     
     logger.info('CSRF token validation attempt', { 
-      userId: session.user.id,
+      userId,
+      isWalletUser,
       isValid
     })
 
@@ -93,14 +104,18 @@ export async function DELETE(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
     }
 
-    await csrfProtection.invalidateToken(session.user.id)
+    // Get authenticated user ID (supports both traditional and wallet users)
+    const userId = await getAuthenticatedUserId(request)
+    const isWalletUser = !session.user.id
+
+    await csrfProtection.invalidateToken(userId)
     
     // Create response and clear cookie
     const response = NextResponse.json({
@@ -110,7 +125,8 @@ export async function DELETE(request: NextRequest) {
     response.cookies.delete('csrf-token')
 
     logger.info('CSRF token invalidated for user', { 
-      userId: session.user.id
+      userId,
+      isWalletUser
     })
 
     return response

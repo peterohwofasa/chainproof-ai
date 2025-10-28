@@ -1,0 +1,169 @@
+{
+  "timestamp": "2025-10-23T14:46:58.999Z",
+  "status": "SUCCESS",
+  "errors": 0,
+  "logs": [
+    {
+      "timestamp": "2025-10-23T14:46:57.887Z",
+      "message": "🚀 Starting MongoDB migration and validation process...",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.474Z",
+      "message": "✅ Connected to MongoDB",
+      "type": "success"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.474Z",
+      "message": "📊 Database: test",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.475Z",
+      "message": "🔗 Host: ac-zgl6hdg-shard-00-02.5uuq2xj.mongodb.net:27017",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.475Z",
+      "message": "🔍 Validating MongoDB connection...",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.510Z",
+      "message": "✅ MongoDB ping successful",
+      "type": "success"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.510Z",
+      "message": "📊 Connection state: 1 (connected)",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.510Z",
+      "message": "🔍 Checking for existing data in MongoDB...",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.594Z",
+      "message": "Found 5 collections: users, audits, vulnerabilities, contracts, projects",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.627Z",
+      "message": "📊 users: 0 documents",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.666Z",
+      "message": "📊 audits: 0 documents",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.726Z",
+      "message": "📊 vulnerabilities: 0 documents",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.759Z",
+      "message": "📊 contracts: 0 documents",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.792Z",
+      "message": "📊 projects: 0 documents",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.793Z",
+      "message": "🔧 Creating database indexes...",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.835Z",
+      "message": "✅ Created indexes for User model",
+      "type": "success"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.835Z",
+      "message": "✅ Created indexes for Project model",
+      "type": "success"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.836Z",
+      "message": "✅ Created indexes for Audit model",
+      "type": "success"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.836Z",
+      "message": "🧪 Testing basic database operations...",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.886Z",
+      "message": "✅ Test document created successfully",
+      "type": "success"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.924Z",
+      "message": "✅ Test document query successful",
+      "type": "success"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.964Z",
+      "message": "✅ Test document update successful",
+      "type": "success"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.999Z",
+      "message": "✅ Test document deletion successful",
+      "type": "success"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.999Z",
+      "message": "📋 Generating migration report...",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:58.999Z",
+      "message": "🔍 Checking for existing data in MongoDB...",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:59.033Z",
+      "message": "Found 5 collections: users, audits, vulnerabilities, contracts, projects",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:59.065Z",
+      "message": "📊 users: 0 documents",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:59.098Z",
+      "message": "📊 audits: 0 documents",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:59.130Z",
+      "message": "📊 vulnerabilities: 0 documents",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:59.163Z",
+      "message": "📊 contracts: 0 documents",
+      "type": "info"
+    },
+    {
+      "timestamp": "2025-10-23T14:46:59.197Z",
+      "message": "📊 projects: 0 documents",
+      "type": "info"
+    }
+  ],
+  "collections": {
+    "users": 0,
+    "audits": 0,
+    "vulnerabilities": 0,
+    "contracts": 0,
+    "projects": 0
+  }
+}

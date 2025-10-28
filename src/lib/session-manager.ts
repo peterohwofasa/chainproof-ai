@@ -1,6 +1,72 @@
-import { redisClient } from './redis';
 import { logger } from './logger';
 import { randomBytes, createHash } from 'crypto';
+
+// In-memory fallback storage when Redis is disabled
+class InMemorySessionStore {
+  private sessions: Map<string, SessionData> = new Map();
+  private userSessions: Map<string, Set<string>> = new Map();
+  private activeSessions: Set<string> = new Set();
+  private sessionActivity: SessionActivity[] = [];
+
+  set(key: string, value: SessionData, ttl?: number): void {
+    this.sessions.set(key, value);
+    // Simple TTL implementation - in production, you'd want a proper cleanup mechanism
+    if (ttl) {
+      setTimeout(() => {
+        this.sessions.delete(key);
+      }, ttl * 1000);
+    }
+  }
+
+  get(key: string): SessionData | null {
+    return this.sessions.get(key) || null;
+  }
+
+  delete(key: string): void {
+    this.sessions.delete(key);
+  }
+
+  addToUserSessions(userId: string, sessionId: string): void {
+    if (!this.userSessions.has(userId)) {
+      this.userSessions.set(userId, new Set());
+    }
+    this.userSessions.get(userId)!.add(sessionId);
+  }
+
+  getUserSessions(userId: string): string[] {
+    return Array.from(this.userSessions.get(userId) || []);
+  }
+
+  removeFromUserSessions(userId: string, sessionId: string): void {
+    this.userSessions.get(userId)?.delete(sessionId);
+  }
+
+  addToActiveSessions(sessionId: string): void {
+    this.activeSessions.add(sessionId);
+  }
+
+  removeFromActiveSessions(sessionId: string): void {
+    this.activeSessions.delete(sessionId);
+  }
+
+  getActiveSessions(): string[] {
+    return Array.from(this.activeSessions);
+  }
+
+  addActivity(activity: SessionActivity): void {
+    this.sessionActivity.push(activity);
+    // Keep only last 1000 activities
+    if (this.sessionActivity.length > 1000) {
+      this.sessionActivity = this.sessionActivity.slice(-1000);
+    }
+  }
+
+  getRecentActivity(limit: number = 50): SessionActivity[] {
+    return this.sessionActivity.slice(-limit);
+  }
+}
+
+const inMemoryStore = new InMemorySessionStore();
 
 export interface SessionData {
   userId: string;
@@ -11,6 +77,10 @@ export interface SessionData {
   ipAddress: string;
   userAgent: string;
   isActive: boolean;
+  isBaseAccount?: boolean;
+  onlineStatus?: 'online' | 'offline' | 'away';
+  walletAddress?: string;
+  baseAccountData?: Record<string, any>;
   metadata?: Record<string, any>;
 }
 
@@ -52,7 +122,13 @@ class SessionManager {
     role: string,
     ipAddress: string,
     userAgent: string,
-    metadata?: Record<string, any>
+    options?: {
+      metadata?: Record<string, any>;
+      isBaseAccount?: boolean;
+      onlineStatus?: 'online' | 'offline' | 'away';
+      walletAddress?: string;
+      baseAccountData?: Record<string, any>;
+    }
   ): Promise<string> {
     try {
       // Generate secure session ID
@@ -72,26 +148,40 @@ class SessionManager {
         ipAddress,
         userAgent,
         isActive: true,
-        metadata
+        isBaseAccount: options?.isBaseAccount,
+        onlineStatus: options?.onlineStatus || 'online',
+        walletAddress: options?.walletAddress,
+        baseAccountData: options?.baseAccountData,
+        metadata: options?.metadata
       };
 
-      // Store session in Redis with TTL
-      const sessionKey = `${this.SESSION_PREFIX}${sessionId}`;
-      await redisClient.setex(sessionKey, this.DEFAULT_TTL, JSON.stringify(sessionData));
+      // Store session - use in-memory fallback if Redis is disabled
+      if (redisClient.isReady()) {
+        const sessionKey = `${this.SESSION_PREFIX}${sessionId}`;
+        await redisClient.setex(sessionKey, this.DEFAULT_TTL, JSON.stringify(sessionData));
 
-      // Add to user's session list
-      const userSessionsKey = `${this.USER_SESSIONS_PREFIX}${userId}`;
-      await redisClient.sadd(userSessionsKey, sessionId);
-      await redisClient.expire(userSessionsKey, this.DEFAULT_TTL);
+        // Add to user's session list
+        const userSessionsKey = `${this.USER_SESSIONS_PREFIX}${userId}`;
+        await redisClient.sadd(userSessionsKey, sessionId);
+        await redisClient.expire(userSessionsKey, this.DEFAULT_TTL);
 
-      // Add to active sessions set
-      await redisClient.sadd(this.ACTIVE_SESSIONS_SET, sessionId);
+        // Add to active sessions set
+        await redisClient.sadd(this.ACTIVE_SESSIONS_SET, sessionId);
+      } else {
+        // Use in-memory fallback
+        logger.warn('Redis not available, using in-memory session storage');
+        inMemoryStore.set(sessionId, sessionData, this.DEFAULT_TTL);
+        inMemoryStore.addToUserSessions(userId, sessionId);
+        inMemoryStore.addToActiveSessions(sessionId);
+      }
 
       // Log session creation activity
       await this.logActivity(sessionId, userId, 'session_created', ipAddress, userAgent, {
         email,
         role,
-        metadata
+        isBaseAccount: options?.isBaseAccount,
+        walletAddress: options?.walletAddress,
+        metadata: options?.metadata
       });
 
       logger.info('Session created', {
@@ -114,15 +204,24 @@ class SessionManager {
    */
   async getSession(sessionId: string): Promise<SessionData | null> {
     try {
-      const sessionKey = `${this.SESSION_PREFIX}${sessionId}`;
-      const sessionDataStr = await redisClient.get(sessionKey);
+      let sessionData: SessionData | null = null;
+
+      if (redisClient.isReady()) {
+        const sessionKey = `${this.SESSION_PREFIX}${sessionId}`;
+        const sessionDataStr = await redisClient.get(sessionKey);
+        
+        if (sessionDataStr) {
+          sessionData = JSON.parse(sessionDataStr);
+        }
+      } else {
+        // Use in-memory fallback
+        sessionData = inMemoryStore.get(sessionId);
+      }
       
-      if (!sessionDataStr) {
+      if (!sessionData) {
         return null;
       }
 
-      const sessionData: SessionData = JSON.parse(sessionDataStr);
-      
       // Check if session is still active
       if (!sessionData.isActive) {
         return null;
@@ -345,7 +444,52 @@ class SessionManager {
   }
 
   /**
-   * Validate session and return user data
+   * Update online status for a user's session
+   */
+  async updateOnlineStatus(
+    sessionId: string,
+    onlineStatus: 'online' | 'offline' | 'away'
+  ): Promise<boolean> {
+    try {
+      const sessionData = await this.getSession(sessionId);
+      if (!sessionData) {
+        return false;
+      }
+
+      // Update the online status
+      sessionData.onlineStatus = onlineStatus;
+      sessionData.lastActivity = new Date().toISOString();
+
+      // Store updated session data
+      if (redisClient.isReady()) {
+        const sessionKey = `${this.SESSION_PREFIX}${sessionId}`;
+        await redisClient.setex(sessionKey, this.DEFAULT_TTL, JSON.stringify(sessionData));
+      } else {
+        inMemoryStore.set(sessionId, sessionData, this.DEFAULT_TTL);
+      }
+
+      // Log the status change
+      await this.logActivity(sessionId, sessionData.userId, 'status_changed', 
+        sessionData.ipAddress, sessionData.userAgent, { 
+          newStatus: onlineStatus,
+          previousStatus: sessionData.onlineStatus 
+        });
+
+      logger.info('Online status updated', {
+        sessionId,
+        userId: sessionData.userId,
+        onlineStatus
+      });
+
+      return true;
+    } catch (error) {
+      logger.error('Failed to update online status', { error, sessionId, onlineStatus });
+      return false;
+    }
+  }
+
+  /**
+   * Validate a session and return session data if valid
    */
   async validateSession(sessionId: string): Promise<{ valid: boolean; sessionData?: SessionData }> {
     try {

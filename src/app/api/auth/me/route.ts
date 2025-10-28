@@ -1,16 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server'
 import connectDB from '@/lib/mongodb'
 import { User, Subscription, Audit } from '@/models'
-import { requireAuth } from '@/lib/auth'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils'
 
 export async function GET(request: NextRequest) {
   try {
     // Connect to MongoDB
     await connectDB()
     
-    const authUser = await requireAuth(request)
+    // Check authentication
+    const session = await getServerSession(authOptions)
+    if (!session?.user) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      )
+    }
 
-    const user = await User.findById(authUser.userId).select(
+    // Get authenticated user ID (supports both traditional and wallet auth)
+    const userId = await getAuthenticatedUserId(request)
+
+    const user = await User.findById(userId).select(
       'email name walletAddress createdAt'
     )
 
@@ -23,13 +35,13 @@ export async function GET(request: NextRequest) {
 
     // Get active subscription
     const subscription = await Subscription.findOne({
-      userId: authUser.userId,
+      userId: userId,
       status: 'ACTIVE'
     }).select('plan status creditsRemaining createdAt isFreeTrial freeTrialStarted freeTrialEnds')
       .sort({ createdAt: -1 })
 
     // Count audits
-    const auditCount = await Audit.countDocuments({ userId: authUser.userId })
+    const auditCount = await Audit.countDocuments({ userId: userId })
 
     return NextResponse.json({
       success: true,

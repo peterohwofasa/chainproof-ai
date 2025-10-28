@@ -1,8 +1,8 @@
-import { randomBytes, createHash } from 'crypto'
 import { db } from './db'
-import { redisClient } from './redis'
+
 import { logger } from './logger'
-import { ErrorMonitor } from './error-monitoring'
+import { errorMonitoring } from './error-monitoring'
+import { createHash, randomBytes } from 'crypto'
 
 export interface APIKeyConfig {
   keyLength: number
@@ -14,16 +14,12 @@ export interface APIKeyConfig {
 
 export interface APIKeyData {
   id: string
-  keyHash: string
   userId: string
   name: string
-  permissions: string[]
-  version: number
   isActive: boolean
-  expiresAt: Date
-  lastUsed?: Date
+  expiresAt: Date | null
+  lastUsedAt?: Date | null
   createdAt: Date
-  rotatedAt?: Date
 }
 
 export interface KeyRotationResult {
@@ -34,9 +30,52 @@ export interface KeyRotationResult {
   gracePeriodEnds: Date
 }
 
+/**
+ * In-memory cache for API key data when Redis is not available
+ */
+class InMemoryAPIKeyCache {
+  private cache = new Map<string, { data: any; expiresAt: number }>()
+
+  set(key: string, value: any, ttlSeconds: number): void {
+    const expiresAt = Date.now() + (ttlSeconds * 1000)
+    this.cache.set(key, { data: value, expiresAt })
+  }
+
+  get(key: string): any | null {
+    const entry = this.cache.get(key)
+    if (!entry) return null
+
+    if (Date.now() > entry.expiresAt) {
+      this.cache.delete(key)
+      return null
+    }
+
+    return entry.data
+  }
+
+  delete(key: string): void {
+    this.cache.delete(key)
+  }
+
+  clear(): void {
+    this.cache.clear()
+  }
+
+  // Clean up expired entries
+  cleanup(): void {
+    const now = Date.now()
+    for (const [key, entry] of this.cache.entries()) {
+      if (now > entry.expiresAt) {
+        this.cache.delete(key)
+      }
+    }
+  }
+}
+
 export class APIKeyRotationService {
   private config: APIKeyConfig
-  private errorMonitor: ErrorMonitor
+  private errorMonitor: typeof errorMonitoring
+  private inMemoryCache: InMemoryAPIKeyCache
 
   constructor(config?: Partial<APIKeyConfig>) {
     this.config = {
@@ -47,7 +86,13 @@ export class APIKeyRotationService {
       keyPrefix: 'cp_',
       ...config
     }
-    this.errorMonitor = new ErrorMonitor()
+    this.errorMonitor = errorMonitoring
+    this.inMemoryCache = new InMemoryAPIKeyCache()
+
+    // Clean up expired cache entries every 5 minutes
+    setInterval(() => {
+      this.inMemoryCache.cleanup()
+    }, 5 * 60 * 1000)
   }
 
   /**
@@ -70,8 +115,7 @@ export class APIKeyRotationService {
    */
   async createAPIKey(
     userId: string,
-    name: string,
-    permissions: string[] = ['read']
+    name: string
   ): Promise<{ key: string; keyData: APIKeyData }> {
     try {
       // Check if user has reached maximum active keys
@@ -90,47 +134,61 @@ export class APIKeyRotationService {
       }
 
       const key = this.generateAPIKey()
-      const keyHash = this.hashKey(key)
       const expiresAt = new Date(Date.now() + this.config.rotationInterval * 1000)
-
-      // Get the next version number for this user
-      const latestKey = await db.apiKey.findFirst({
-        where: { userId },
-        orderBy: { version: 'desc' }
-      })
-      const version = (latestKey?.version || 0) + 1
 
       const keyData = await db.apiKey.create({
         data: {
-          keyHash,
+          key,
           userId,
           name,
-          permissions,
-          version,
           isActive: true,
-          expiresAt,
-          createdAt: new Date()
+          expiresAt
         }
       })
 
-      // Cache key hash in Redis for fast lookup
-      await redisClient.setex(
-        `api_key:${keyHash}`,
-        this.config.rotationInterval,
-        JSON.stringify({
-          id: keyData.id,
-          userId: keyData.userId,
-          permissions: keyData.permissions,
-          version: keyData.version
-        })
-      )
+      // Cache key in Redis for fast lookup, fallback to in-memory cache
+      try {
+        if (redisClient.isReady()) {
+          await redisClient.setex(
+            `api_key:${key}`,
+            this.config.rotationInterval,
+            JSON.stringify({
+              id: keyData.id,
+              userId: keyData.userId,
+              name: keyData.name,
+              isActive: keyData.isActive
+            })
+          )
+        } else {
+          this.inMemoryCache.set(
+            `api_key:${key}`,
+            {
+              id: keyData.id,
+              userId: keyData.userId,
+              name: keyData.name,
+              isActive: keyData.isActive
+            },
+            this.config.rotationInterval
+          )
+        }
+      } catch (error) {
+        // Fallback to in-memory cache if Redis fails
+        this.inMemoryCache.set(
+          `api_key:${key}`,
+          {
+            id: keyData.id,
+            userId: keyData.userId,
+            name: keyData.name,
+            isActive: keyData.isActive
+          },
+          this.config.rotationInterval
+        )
+      }
 
       logger.info('API key created', {
         userId,
         keyId: keyData.id,
         name,
-        permissions,
-        version,
         expiresAt
       })
 
@@ -164,22 +222,17 @@ export class APIKeyRotationService {
 
       // Generate new key
       const newKey = this.generateAPIKey()
-      const newKeyHash = this.hashKey(newKey)
       const newExpiresAt = new Date(Date.now() + this.config.rotationInterval * 1000)
       const gracePeriodEnds = new Date(Date.now() + this.config.gracePeriod * 1000)
 
-      // Create new key version
+      // Create new key
       const newKeyData = await db.apiKey.create({
         data: {
-          keyHash: newKeyHash,
+          key: newKey,
           userId: existingKey.userId,
           name: existingKey.name,
-          permissions: existingKey.permissions,
-          version: existingKey.version + 1,
           isActive: true,
-          expiresAt: newExpiresAt,
-          createdAt: new Date(),
-          rotatedAt: new Date()
+          expiresAt: newExpiresAt
         }
       })
 
@@ -187,41 +240,90 @@ export class APIKeyRotationService {
       await db.apiKey.update({
         where: { id: keyId },
         data: {
-          expiresAt: gracePeriodEnds,
-          rotatedAt: new Date()
+          expiresAt: gracePeriodEnds
         }
       })
 
-      // Update Redis cache
-      await redisClient.setex(
-        `api_key:${newKeyHash}`,
-        this.config.rotationInterval,
-        JSON.stringify({
-          id: newKeyData.id,
-          userId: newKeyData.userId,
-          permissions: newKeyData.permissions,
-          version: newKeyData.version
-        })
-      )
+      // Update Redis cache, fallback to in-memory cache
+      try {
+        if (redisClient.isReady()) {
+          await redisClient.setex(
+            `api_key:${newKey}`,
+            this.config.rotationInterval,
+            JSON.stringify({
+              id: newKeyData.id,
+              userId: newKeyData.userId,
+              name: newKeyData.name,
+              isActive: newKeyData.isActive
+            })
+          )
 
-      // Keep old key in cache during grace period
-      await redisClient.setex(
-        `api_key:${existingKey.keyHash}`,
-        this.config.gracePeriod,
-        JSON.stringify({
-          id: existingKey.id,
-          userId: existingKey.userId,
-          permissions: existingKey.permissions,
-          version: existingKey.version,
-          deprecated: true
-        })
-      )
+          // Keep old key in cache during grace period
+          await redisClient.setex(
+            `api_key:${existingKey.key}`,
+            this.config.gracePeriod,
+            JSON.stringify({
+              id: existingKey.id,
+              userId: existingKey.userId,
+              name: existingKey.name,
+              isActive: existingKey.isActive,
+              deprecated: true
+            })
+          )
+        } else {
+          this.inMemoryCache.set(
+            `api_key:${newKey}`,
+            {
+              id: newKeyData.id,
+              userId: newKeyData.userId,
+              name: newKeyData.name,
+              isActive: newKeyData.isActive
+            },
+            this.config.rotationInterval
+          )
+
+          this.inMemoryCache.set(
+            `api_key:${existingKey.key}`,
+            {
+              id: existingKey.id,
+              userId: existingKey.userId,
+              name: existingKey.name,
+              isActive: existingKey.isActive,
+              deprecated: true
+            },
+            this.config.gracePeriod
+          )
+        }
+      } catch (error) {
+        // Fallback to in-memory cache if Redis fails
+        this.inMemoryCache.set(
+          `api_key:${newKey}`,
+          {
+            id: newKeyData.id,
+            userId: newKeyData.userId,
+            name: newKeyData.name,
+            isActive: newKeyData.isActive
+          },
+          this.config.rotationInterval
+        )
+
+        this.inMemoryCache.set(
+          `api_key:${existingKey.key}`,
+          {
+            id: existingKey.id,
+            userId: existingKey.userId,
+            name: existingKey.name,
+            isActive: existingKey.isActive,
+            deprecated: true
+          },
+          this.config.gracePeriod
+        )
+      }
 
       logger.info('API key rotated', {
         oldKeyId: keyId,
         newKeyId: newKeyData.id,
         userId: existingKey.userId,
-        version: newKeyData.version,
         gracePeriodEnds
       })
 
@@ -246,13 +348,25 @@ export class APIKeyRotationService {
    */
   async validateAPIKey(key: string): Promise<APIKeyData | null> {
     try {
-      const keyHash = this.hashKey(key)
+      // First check Redis cache, fallback to in-memory cache
+      let cachedData: string | null = null
+      let keyInfo: any = null
 
-      // First check Redis cache
-      const cachedData = await redisClient.get(`api_key:${keyHash}`)
-      if (cachedData) {
-        const keyInfo = JSON.parse(cachedData)
-        
+      try {
+        if (redisClient.isReady()) {
+          cachedData = await redisClient.get(`api_key:${key}`)
+          if (cachedData) {
+            keyInfo = JSON.parse(cachedData)
+          }
+        } else {
+          keyInfo = this.inMemoryCache.get(`api_key:${key}`)
+        }
+      } catch (error) {
+        // Fallback to in-memory cache if Redis fails
+        keyInfo = this.inMemoryCache.get(`api_key:${key}`)
+      }
+
+      if (keyInfo) {
         // Update last used timestamp
         await this.updateLastUsed(keyInfo.id)
         
@@ -272,7 +386,7 @@ export class APIKeyRotationService {
       // Fallback to database lookup
       const keyData = await db.apiKey.findFirst({
         where: {
-          keyHash,
+          key,
           isActive: true,
           expiresAt: {
             gt: new Date()
@@ -281,17 +395,29 @@ export class APIKeyRotationService {
       })
 
       if (keyData) {
-        // Update cache
-        await redisClient.setex(
-          `api_key:${keyHash}`,
-          Math.floor((keyData.expiresAt.getTime() - Date.now()) / 1000),
-          JSON.stringify({
-            id: keyData.id,
-            userId: keyData.userId,
-            permissions: keyData.permissions,
-            version: keyData.version
-          })
-        )
+        // Update cache, fallback to in-memory cache
+        const ttlSeconds = keyData.expiresAt ? Math.floor((keyData.expiresAt.getTime() - Date.now()) / 1000) : 3600
+        const cacheValue = {
+          id: keyData.id,
+          userId: keyData.userId,
+          name: keyData.name,
+          isActive: keyData.isActive
+        }
+
+        try {
+          if (redisClient.isReady()) {
+            await redisClient.setex(
+              `api_key:${key}`,
+              ttlSeconds,
+              JSON.stringify(cacheValue)
+            )
+          } else {
+            this.inMemoryCache.set(`api_key:${key}`, cacheValue, ttlSeconds)
+          }
+        } catch (error) {
+          // Fallback to in-memory cache if Redis fails
+          this.inMemoryCache.set(`api_key:${key}`, cacheValue, ttlSeconds)
+        }
 
         await this.updateLastUsed(keyData.id)
       }
@@ -312,7 +438,7 @@ export class APIKeyRotationService {
     try {
       await db.apiKey.update({
         where: { id: keyId },
-        data: { lastUsed: new Date() }
+        data: { lastUsedAt: new Date() }
       })
     } catch (error) {
       // Log but don't throw - this is not critical
@@ -345,8 +471,17 @@ export class APIKeyRotationService {
         }
       })
 
-      // Remove from Redis cache
-      await redisClient.del(`api_key:${keyData.keyHash}`)
+      // Remove from Redis cache, fallback to in-memory cache
+      try {
+        if (redisClient.isReady()) {
+          await redisClient.del(`api_key:${keyData.key}`)
+        } else {
+          this.inMemoryCache.delete(`api_key:${keyData.key}`)
+        }
+      } catch (error) {
+        // Fallback to in-memory cache if Redis fails
+        this.inMemoryCache.delete(`api_key:${keyData.key}`)
+      }
 
       logger.info('API key revoked', {
         keyId,

@@ -1,26 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { createStripeCheckoutSession } from '@/lib/stripe'
 import { connectDB, User } from '@/models'
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils'
 
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
     }
 
-    const body = await request.json()
-    const { priceId, planName } = body
+    // Get authenticated user ID (supports both traditional and wallet users)
+    const userId = await getAuthenticatedUserId(request)
+    const isWalletUser = !session.user.id
 
-    if (!priceId) {
+    const body = await request.json()
+    const { planName } = body
+
+    if (!planName) {
       return NextResponse.json(
-        { error: 'Price ID is required' },
+        { error: 'Plan name is required' },
         { status: 400 }
       )
     }
@@ -29,8 +33,8 @@ export async function POST(request: NextRequest) {
     await connectDB()
 
     // Get user details
-    const user = await User.findById(session.user.id)
-      .select('email name')
+    const user = await User.findById(userId)
+      .select('email name walletAddress')
       .lean()
 
     if (!user) {
@@ -40,23 +44,35 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create Stripe checkout session
     const baseUrl = process.env.NEXTAUTH_URL || 'http://localhost:3000'
-    const checkoutSession = await createStripeCheckoutSession(
-      session.user.id,
-      priceId,
-      `${baseUrl}/settings/billing?success=true`,
-      `${baseUrl}/pricing?cancelled=true`
-    )
 
-    return NextResponse.json({ 
-      sessionId: checkoutSession.id,
-      url: checkoutSession.url 
-    })
+    // Handle different plan types
+    if (planName.toLowerCase() === 'free') {
+      // For free plan, redirect to activation endpoint
+      return NextResponse.json({ 
+        redirectUrl: `${baseUrl}/api/subscription/activate-free`,
+        method: 'POST'
+      })
+    } else if (planName.toLowerCase() === 'enterprise') {
+      // For enterprise, redirect to contact
+      return NextResponse.json({ 
+        redirectUrl: `mailto:contact@chainproof.ai?subject=Enterprise Plan Inquiry`,
+        method: 'GET'
+      })
+    } else {
+      // For paid plans (Professional), use Base Pay
+      // The frontend will handle the Base Pay integration directly
+      return NextResponse.json({ 
+        message: 'Use Base Pay for subscription payment',
+        planName: planName,
+        useBasePay: true
+      })
+    }
+
   } catch (error) {
     console.error('Checkout session creation error:', error)
     return NextResponse.json(
-      { error: 'Failed to create checkout session' },
+      { error: 'Failed to process checkout request' },
       { status: 500 }
     )
   }

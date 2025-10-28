@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { connectDB, Project, Team, TeamMember, Contract, Audit, Activity } from '@/models'
+import { connectDB, Project, Team, TeamMember, Contract, Audit, Activity, User } from '@/models'
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils'
 import { z } from 'zod'
 
 const createProjectSchema = z.object({
@@ -21,8 +22,14 @@ export async function GET(request: NextRequest) {
     await connectDB()
     
     const session = await getServerSession(authOptions)
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+    const userId = await getAuthenticatedUserId(request)
+    if (!userId) {
+      return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 })
     }
 
     const { searchParams } = new URL(request.url)
@@ -34,7 +41,7 @@ export async function GET(request: NextRequest) {
     const skip = (page - 1) * limit
 
     const filter: any = {
-      userId: session.user.id,
+      userId: userId,
     }
 
     if (search) {
@@ -129,8 +136,14 @@ export async function POST(request: NextRequest) {
     await connectDB()
     
     const session = await getServerSession(authOptions)
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+    const userId = await getAuthenticatedUserId(request)
+    if (!userId) {
+      return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 })
     }
 
     const body = await request.json()
@@ -140,7 +153,7 @@ export async function POST(request: NextRequest) {
     if (validatedData.teamId) {
       const teamMember = await TeamMember.findOne({
         teamId: validatedData.teamId,
-        userId: session.user.id,
+        userId: userId,
       })
 
       if (!teamMember) {
@@ -153,7 +166,7 @@ export async function POST(request: NextRequest) {
 
     const project = await Project.create({
       ...validatedData,
-      userId: session.user.id,
+      userId: userId,
     })
 
     // Populate team data if teamId exists
@@ -191,7 +204,7 @@ export async function POST(request: NextRequest) {
 
     // Log activity
     await Activity.create({
-      userId: session.user.id,
+      userId: userId,
       action: 'PROJECT_CREATED',
       target: project._id.toString(),
       metadata: JSON.stringify({

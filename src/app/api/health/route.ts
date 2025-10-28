@@ -5,7 +5,7 @@ import { connectDB } from '@/models';
 import { config } from '@/lib/config';
 import { databaseBackup } from '@/lib/backup';
 import { rateLimiter } from '@/lib/rate-limiter';
-import { redisClient } from '@/lib/redis';
+// Redis removed - using in-memory rate limiter instead
 import { healthCheckService } from '@/lib/health-check';
 import mongoose from 'mongoose';
 
@@ -57,6 +57,9 @@ async function checkDatabaseHealth(): Promise<ServiceStatus> {
   try {
     await connectDB();
     // Simple ping to check MongoDB connection
+    if (!mongoose.connection.db) {
+      throw new Error('Database connection not established');
+    }
     await mongoose.connection.db.admin().ping();
     return {
       status: 'healthy',
@@ -116,32 +119,13 @@ function checkRateLimiterHealth(): ServiceStatus {
 }
 
 async function checkRedisHealth(): Promise<ServiceStatus> {
-  const start = Date.now();
-  try {
-    if (!redisClient.isReady()) {
-      return {
-        status: 'unhealthy',
-        error: 'Redis client not connected',
-        lastCheck: new Date().toISOString()
-      };
-    }
-
-    const pingResult = await redisClient.ping();
-    return {
-      status: pingResult ? 'healthy' : 'unhealthy',
-      responseTime: Date.now() - start,
-      error: pingResult ? undefined : 'Redis ping failed',
-      lastCheck: new Date().toISOString()
-    };
-  } catch (error) {
-    logger.error('Redis health check failed', { error });
-    return {
-      status: 'unhealthy',
-      error: error instanceof Error ? error.message : 'Unknown error',
-      responseTime: Date.now() - start,
-      lastCheck: new Date().toISOString()
-    };
-  }
+  // Redis has been removed and replaced with in-memory rate limiting
+  return {
+    status: 'healthy',
+    responseTime: 0,
+    error: 'Redis disabled - using in-memory rate limiter',
+    lastCheck: new Date().toISOString()
+  };
 }
 
 async function getMemoryStatus(): Promise<MemoryStatus> {

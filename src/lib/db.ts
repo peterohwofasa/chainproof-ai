@@ -1,38 +1,47 @@
-import { PrismaClient, Prisma } from '@prisma/client'
+import mongoose from 'mongoose';
+import connectDB from './mongodb';
 
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined
-}
+// MongoDB is now the default database
+export { default as connectDB } from './mongodb';
 
-// Database configuration based on environment
-const getDatabaseConfig = (): Prisma.PrismaClientOptions => {
-  const isProduction = process.env.NODE_ENV === 'production'
-  
-  return {
-    log: isProduction ? ['error'] as Prisma.LogLevel[] : ['query', 'info', 'warn', 'error'] as Prisma.LogLevel[],
-    datasources: {
-      db: {
-        url: process.env.DATABASE_URL,
-      },
-    },
-    // Connection pool settings for production
-    ...(isProduction && {
-      datasources: {
-        db: {
-          url: process.env.DATABASE_URL,
-        },
-      },
-    }),
+// Export all models for easy access
+export * from '../models';
+
+// Database connection utility
+export const db = {
+  connect: connectDB,
+  disconnect: async () => {
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect();
+    }
+  },
+  isConnected: () => mongoose.connection.readyState === 1,
+  getConnection: () => mongoose.connection
+};
+
+// Initialize database connection
+export const initializeDatabase = async () => {
+  try {
+    await connectDB();
+    console.log('✅ MongoDB connected successfully');
+    return true;
+  } catch (error) {
+    console.error('❌ MongoDB connection failed:', error);
+    return false;
   }
-}
-
-export const db =
-  globalForPrisma.prisma ??
-  new PrismaClient(getDatabaseConfig())
-
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+};
 
 // Graceful shutdown
 process.on('beforeExit', async () => {
-  await db.$disconnect()
-})
+  await db.disconnect();
+});
+
+process.on('SIGINT', async () => {
+  await db.disconnect();
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  await db.disconnect();
+  process.exit(0);
+});

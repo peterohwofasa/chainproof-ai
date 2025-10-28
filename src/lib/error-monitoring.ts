@@ -1,5 +1,5 @@
 import { logger } from './logger';
-import { redisClient } from './redis';
+
 
 export interface ErrorMetrics {
   errorId: string;
@@ -170,15 +170,8 @@ class ErrorMonitoringService {
    * Get error details by ID
    */
   async getErrorById(errorId: string): Promise<ErrorMetrics | null> {
-    try {
-      const errorData = await redisClient.get(`error:${errorId}`);
-      return errorData ? JSON.parse(errorData) : null;
-    } catch (error) {
-      logger.error('Failed to get error by ID', { error, errorId });
-      
-      // Fallback to in-memory search
-      return this.recentErrors.find(e => e.errorId === errorId) || null;
-    }
+    // Redis is disabled - search in-memory data only
+    return this.recentErrors.find(e => e.errorId === errorId) || null;
   }
 
   /**
@@ -188,23 +181,7 @@ class ErrorMonitoringService {
     const cutoffTime = Date.now() - (this.errorRetentionDays * 24 * 60 * 60 * 1000);
     
     try {
-      // Clean up Redis
-      const keys = await redisClient.keys('error:*');
-      const pipeline = redisClient.pipeline();
-      
-      for (const key of keys) {
-        const errorData = await redisClient.get(key);
-        if (errorData) {
-          const error = JSON.parse(errorData);
-          if (new Date(error.timestamp).getTime() < cutoffTime) {
-            pipeline.del(key);
-          }
-        }
-      }
-      
-      await pipeline.exec();
-      
-      // Clean up in-memory errors
+      // Redis is disabled - only clean up in-memory errors
       this.recentErrors = this.recentErrors.filter(
         e => new Date(e.timestamp).getTime() >= cutoffTime
       );
@@ -216,21 +193,9 @@ class ErrorMonitoringService {
   }
 
   private async storeInRedis(errorMetrics: ErrorMetrics): Promise<void> {
-    try {
-      if (redisClient.isReady()) {
-        const key = `error:${errorMetrics.errorId}`;
-        await redisClient.setex(key, this.errorRetentionDays * 24 * 60 * 60, JSON.stringify(errorMetrics));
-        
-        // Also add to sorted set for time-based queries
-        await redisClient.zadd(
-          'errors:timeline',
-          new Date(errorMetrics.timestamp).getTime(),
-          errorMetrics.errorId
-        );
-      }
-    } catch (error) {
-      logger.error('Failed to store error in Redis', { error });
-    }
+    // Redis is disabled - all error storage is handled by storeInMemory
+    // This method is kept for compatibility but performs no operations
+    return;
   }
 
   private storeInMemory(errorMetrics: ErrorMetrics): void {
@@ -254,33 +219,9 @@ class ErrorMonitoringService {
   }
 
   private async updateMetrics(errorMetrics: ErrorMetrics): Promise<void> {
-    try {
-      if (redisClient.isReady()) {
-        const today = new Date().toISOString().split('T')[0];
-        const hour = new Date().getHours();
-        
-        // Update daily metrics
-        await redisClient.hincrby(`metrics:errors:${today}`, 'total', 1);
-        await redisClient.hincrby(`metrics:errors:${today}`, errorMetrics.severity, 1);
-        await redisClient.hincrby(`metrics:errors:${today}`, errorMetrics.errorType, 1);
-        
-        // Update hourly metrics
-        await redisClient.hincrby(`metrics:errors:${today}:${hour}`, 'total', 1);
-        await redisClient.hincrby(`metrics:errors:${today}:${hour}`, errorMetrics.severity, 1);
-        
-        // Track unique users affected
-        if (errorMetrics.userId) {
-          await redisClient.sadd(`metrics:affected_users:${today}`, errorMetrics.userId);
-        }
-        
-        // Set expiration for metrics (keep for 90 days)
-        await redisClient.expire(`metrics:errors:${today}`, 90 * 24 * 60 * 60);
-        await redisClient.expire(`metrics:errors:${today}:${hour}`, 90 * 24 * 60 * 60);
-        await redisClient.expire(`metrics:affected_users:${today}`, 90 * 24 * 60 * 60);
-      }
-    } catch (error) {
-      logger.error('Failed to update error metrics', { error });
-    }
+    // Redis is disabled - metrics are calculated from in-memory data when needed
+    // This method is kept for compatibility but performs no operations
+    return;
   }
 
   private determineSeverity(error: any): 'low' | 'medium' | 'high' | 'critical' {
@@ -325,24 +266,8 @@ class ErrorMonitoringService {
   }
 
   private async getErrorsFromRedis(startTime: number, endTime: number): Promise<ErrorMetrics[]> {
-    try {
-      if (!redisClient.isReady()) return [];
-      
-      const errorIds = await redisClient.zrangebyscore('errors:timeline', startTime, endTime);
-      const errors: ErrorMetrics[] = [];
-      
-      for (const errorId of errorIds) {
-        const errorData = await redisClient.get(`error:${errorId}`);
-        if (errorData) {
-          errors.push(JSON.parse(errorData));
-        }
-      }
-      
-      return errors;
-    } catch (error) {
-      logger.error('Failed to get errors from Redis', { error });
-      return [];
-    }
+    // Redis is disabled - return empty array, data will be retrieved from in-memory store
+    return [];
   }
 
   private generateErrorSummary(errors: ErrorMetrics[]): ErrorSummary[] {

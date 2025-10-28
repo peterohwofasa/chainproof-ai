@@ -8,11 +8,15 @@ import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet'
 import { Menu, Shield, User, LogOut } from 'lucide-react'
 import Image from 'next/image'
 import { NotificationBell } from '@/components/notifications/notification-center'
-import { BaseSignInNavButton } from '@/components/auth/base-signin-nav-button'
+import { AuthStatusIndicator } from '@/components/auth/auth-status-indicator'
+import { OnlineStatusToggle } from '@/components/auth/online-status-toggle'
+import { useAuth } from '@/contexts/auth-context'
+
 
 export function Navigation() {
   const [isOpen, setIsOpen] = useState(false)
   const { data: session, status } = useSession()
+  const { user: authUser, isFallbackMode, logout: authLogout } = useAuth()
 
   const navigation = [
     { name: 'Home', href: '/' },
@@ -32,16 +36,22 @@ export function Navigation() {
     { name: 'Support', href: '/support' }
   ]
 
+  const isAuthenticated = session?.user || authUser
+
   const filteredNavigation = navigation.filter(item => 
-    !item.protected || session?.user
+    !item.protected || isAuthenticated
   )
 
   const filteredMobileNavigation = mobileOnlyNavigation.filter(item => 
-    !item.protected || session?.user
+    !item.protected || isAuthenticated
   )
 
   const handleSignOut = () => {
-    signOut({ callbackUrl: '/' })
+    if (isFallbackMode) {
+      authLogout()
+    } else {
+      signOut({ callbackUrl: '/' })
+    }
   }
 
   return (
@@ -81,11 +91,13 @@ export function Navigation() {
           <div className="flex items-center space-x-4">
             {status === 'loading' ? (
               <div className="w-20 h-8 bg-gray-200 dark:bg-gray-700 rounded animate-pulse" />
-            ) : session?.user ? (
+            ) : isAuthenticated ? (
               <div className="flex items-center space-x-4">
+                <AuthStatusIndicator showDetails={false} />
+                <OnlineStatusToggle showLabel={false} />
                 <NotificationBell />
                 <span className="text-sm text-gray-600 dark:text-gray-300">
-                  {session.user.name || session.user.email}
+                  {session?.user?.name || session?.user?.email || authUser?.name || `${authUser?.walletAddress?.slice(0, 6)}...${authUser?.walletAddress?.slice(-4)}`}
                 </span>
                 <Button variant="outline" size="sm" onClick={handleSignOut}>
                   <LogOut className="w-4 h-4 mr-1" />
@@ -94,12 +106,8 @@ export function Navigation() {
               </div>
             ) : (
               <>
-                <Button variant="ghost" size="sm" asChild>
+                <Button variant="default" size="sm" asChild>
                   <Link href="/login">Sign In</Link>
-                </Button>
-                <BaseSignInNavButton />
-                <Button size="sm" asChild>
-                  <Link href="/signup">Get Started</Link>
                 </Button>
               </>
             )}
@@ -143,12 +151,17 @@ export function Navigation() {
                   </div>
                   
                   <div className="pt-4 border-t">
-                    {session?.user ? (
+                    {isAuthenticated ? (
                       <div className="space-y-4">
+                        <AuthStatusIndicator showDetails={true} className="mb-2" />
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm text-gray-500">Status</span>
+                          <OnlineStatusToggle showLabel={true} />
+                        </div>
                         <div className="flex items-center space-x-2">
                           <User className="w-4 h-4" />
                           <span className="text-sm font-medium">
-                            {session.user.name || session.user.email}
+                            {session?.user?.name || session?.user?.email || authUser?.name || `${authUser?.walletAddress?.slice(0, 6)}...${authUser?.walletAddress?.slice(-4)}`}
                           </span>
                         </div>
                         <div className="flex items-center justify-between">
@@ -162,16 +175,8 @@ export function Navigation() {
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        <Button variant="ghost" size="sm" className="w-full justify-start" asChild>
-                          <Link href="/login" onClick={() => setIsOpen(false)}>
-                            Sign In
-                          </Link>
-                        </Button>
-                        <BaseSignInNavButton className="w-full" />
-                        <Button size="sm" className="w-full" asChild>
-                          <Link href="/signup" onClick={() => setIsOpen(false)}>
-                            Get Started
-                          </Link>
+                        <Button variant="default" size="sm" className="w-full" asChild>
+                          <Link href="/login">Sign In</Link>
                         </Button>
                       </div>
                     )}

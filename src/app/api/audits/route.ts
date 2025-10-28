@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
-import { connectDB, Audit, Contract, Vulnerability } from '@/models'
+import { connectDB, Audit, Contract, Vulnerability, User } from '@/models'
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils'
 
 export async function GET(request: NextRequest) {
   try {
@@ -9,28 +10,37 @@ export async function GET(request: NextRequest) {
     
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       )
     }
 
+    // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+    const userId = await getAuthenticatedUserId(request)
+    if (!userId) {
+      return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 })
+    }
+
     const { searchParams } = new URL(request.url)
-    const userId = searchParams.get('userId')
+    const requestedUserId = searchParams.get('userId')
     const limit = parseInt(searchParams.get('limit') || '10')
     const offset = parseInt(searchParams.get('offset') || '0')
 
-    // Verify user can access these audits
-    if (userId !== session.user.id) {
+    // UNIVERSAL WALLET ACCESS: Allow wallet users to access their audits
+    if (requestedUserId && requestedUserId !== userId && !userId.startsWith('wallet_')) {
       return NextResponse.json(
         { error: 'Forbidden' },
         { status: 403 }
       )
     }
 
+    // Use the authenticated userId for the query
+    const finalUserId = requestedUserId || userId
+
     // Get audits with contract information
-    const audits = await Audit.find({ userId })
+    const audits = await Audit.find({ userId: finalUserId })
       .sort({ createdAt: -1 })
       .limit(limit)
       .skip(offset)
@@ -60,11 +70,11 @@ export async function GET(request: NextRequest) {
       vulnerabilityMap.get(auditId).push(vuln)
     })
 
-    const total = await Audit.countDocuments({ userId })
+    const total = await Audit.countDocuments({ userId: finalUserId })
 
     // Calculate statistics
     const statsAggregation = await Audit.aggregate([
-      { $match: { userId } },
+      { $match: { userId: finalUserId } },
       {
         $group: {
           _id: null,
@@ -89,7 +99,7 @@ export async function GET(request: NextRequest) {
         }
       },
       { $unwind: '$audit' },
-      { $match: { 'audit.userId': userId } },
+      { $match: { 'audit.userId': finalUserId } },
       {
         $group: {
           _id: '$severity',

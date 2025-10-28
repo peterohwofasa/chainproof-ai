@@ -77,13 +77,13 @@ export default function QuickStartPage() {
                 Start by creating a free ChainProof account to access our AI-powered auditing tools.
               </p>
               <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
-                <p className="font-mono text-sm mb-2">1. Visit the signup page</p>
+                <p className="font-mono text-sm mb-2">1. Connect your Base wallet</p>
                 <p className="font-mono text-sm mb-2">2. Enter your email and create a password</p>
                 <p className="font-mono text-sm mb-2">3. Verify your email</p>
                 <p className="font-mono text-sm">4. You're ready to start auditing!</p>
               </div>
               <Button asChild>
-                <Link href="/signup">Sign Up Now</Link>
+                <Link href="/login">Connect Base Wallet</Link>
               </Button>
             </CardContent>
           </Card>

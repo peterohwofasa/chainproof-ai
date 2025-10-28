@@ -10,7 +10,8 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Check, Star, Zap, Shield, Crown } from 'lucide-react'
 import { useSession } from 'next-auth/react'
 import { toast } from 'sonner'
-import { DynamicBasePayButton, DynamicCDPPayButton } from '@/components/dynamic-cdp-components'
+import BaseAccountPayButton from '@/components/auth/base-account-pay-button'
+
 
 const plans = [
   {
@@ -90,7 +91,7 @@ export default function PricingPage() {
 
   const handlePlanSelect = async (planName: string) => {
     if (!session) {
-      window.location.href = '/signup'
+      window.location.href = '/login'
       return
     }
 
@@ -99,35 +100,33 @@ export default function PricingPage() {
       return
     }
 
-    // Map plan names to Stripe price IDs (these should come from your Stripe dashboard)
-    const priceIds: { [key: string]: string } = {
-      'Professional': 'price_1Oxxxx', // Replace with actual price ID
-      'Free': 'price_1Oxxxx' // Replace with actual price ID
-    }
+    if (planName === 'Free') {
+      // Handle free plan activation
+      try {
+        const response = await fetch('/api/subscription/activate-free', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        })
 
-    const priceId = priceIds[planName]
-    if (!priceId) {
-      toast.error('Plan not available')
-      return
-    }
-
-    try {
-      const response = await fetch('/api/subscription/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ priceId, planName })
-      })
-
-      if (response.ok) {
-        const { url } = await response.json()
-        window.location.href = url
-      } else {
-        const error = await response.json()
-        throw new Error(error.error || 'Failed to create checkout session')
+        if (response.ok) {
+          toast.success('Free plan activated successfully!')
+          window.location.href = '/dashboard'
+        } else {
+          const error = await response.json()
+          throw new Error(error.error || 'Failed to activate free plan')
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to activate free plan')
       }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to start checkout')
     }
+  }
+
+  const getPlanPrice = (planName: string) => {
+    const prices: { [key: string]: string } = {
+      'Professional': billingCycle === 'annual' ? '39' : '49',
+      'Free': '0'
+    }
+    return prices[planName] || '0'
   }
 
   return (
@@ -232,15 +231,23 @@ export default function PricingPage() {
                 </CardContent>
 
                 <CardFooter className="flex flex-col gap-3">
-                  <Button
-                    variant={plan.buttonVariant}
-                    className="w-full"
-                    onClick={() => handlePlanSelect(plan.name)}
-                  >
-                    {plan.buttonText}
-                  </Button>
-                  
-                  {plan.name !== 'Free' && plan.name !== 'Enterprise' && (
+                  {plan.name === 'Free' ? (
+                    <Button
+                      variant={plan.buttonVariant}
+                      className="w-full"
+                      onClick={() => handlePlanSelect(plan.name)}
+                    >
+                      {plan.buttonText}
+                    </Button>
+                  ) : plan.name === 'Enterprise' ? (
+                    <Button
+                      variant={plan.buttonVariant}
+                      className="w-full"
+                      onClick={() => handlePlanSelect(plan.name)}
+                    >
+                      {plan.buttonText}
+                    </Button>
+                  ) : (
                     <>
                       <div className="relative">
                         <div className="absolute inset-0 flex items-center">
@@ -248,36 +255,24 @@ export default function PricingPage() {
                         </div>
                         <div className="relative flex justify-center text-xs uppercase">
                           <span className="bg-background px-2 text-muted-foreground">
-                            Or pay with crypto
+                            Pay with Base Pay (USDC)
                           </span>
                         </div>
                       </div>
                       
-                      <div className="space-y-2">
-                        <DynamicBasePayButton
-                          amount={adjustedPrice.replace('$', '')}
-                          planName={plan.name}
-                          className="w-full"
-                          onSuccess={(paymentId) => {
-                            toast.success(`Payment successful! Plan activated.`)
-                          }}
-                          onError={(error) => {
-                            toast.error(`Payment failed: ${error}`)
-                          }}
-                        />
-                        
-                        <DynamicCDPPayButton
-                          amount={adjustedPrice.replace('$', '')}
-                          planName={plan.name}
-                          className="w-full"
-                          onSuccess={(transactionHash) => {
-                            toast.success(`Payment successful! Plan activated.`)
-                          }}
-                          onError={(error) => {
-                            toast.error(`Payment failed: ${error}`)
-                          }}
-                        />
-                      </div>
+                      <BaseAccountPayButton
+                        amount={getPlanPrice(plan.name)}
+                        planName={plan.name}
+                        className="w-full"
+                        colorScheme="light"
+                        onSuccess={(paymentId) => {
+                          toast.success(`${plan.name} plan activated successfully!`)
+                          window.location.href = '/dashboard'
+                        }}
+                        onError={(error) => {
+                          toast.error(`Payment failed: ${error}`)
+                        }}
+                      />
                     </>
                   )}
                 </CardFooter>
@@ -330,7 +325,7 @@ export default function PricingPage() {
                   What payment methods do you accept?
                 </h3>
                 <p className="text-slate-600 dark:text-slate-400">
-                  We accept all major credit cards, PayPal, and cryptocurrency payments (ETH, USDC).
+                  We accept payments through Base Pay using USDC on the Base network. This provides fast, secure, and low-cost transactions.
                 </p>
               </div>
               
@@ -365,7 +360,7 @@ export default function PricingPage() {
             Join thousands of developers who trust ChainProof for their smart contract security needs.
           </p>
           <div className="flex gap-4 justify-center">
-            <Button size="lg" onClick={() => window.location.href = '/signup'}>
+            <Button size="lg" onClick={() => window.location.href = '/login'}>
               Start Free
             </Button>
             <Button size="lg" variant="outline" onClick={() => window.location.href = '/audit'}>

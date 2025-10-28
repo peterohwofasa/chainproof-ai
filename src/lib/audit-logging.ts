@@ -3,7 +3,7 @@ import { db } from './db';
 import { logger } from './logger';
 import { getServerSession } from 'next-auth';
 import { authOptions } from './auth';
-import { redisClient } from './redis';
+
 
 export enum AuditEventType {
   // Authentication events
@@ -171,35 +171,9 @@ export class AuditLogger {
    * Store audit entry in Redis for real-time monitoring
    */
   private static async storeInRedis(entry: AuditLogEntry): Promise<void> {
-    try {
-      // Only attempt Redis operations if Redis is available
-      if (!redisClient.isReady()) {
-        logger.debug('Redis not available, skipping audit entry storage in Redis', { entryId: entry.id })
-        return
-      }
-
-      const key = `${this.REDIS_KEY_PREFIX}${entry.id}`
-      await redisClient.setex(key, this.REDIS_TTL, JSON.stringify(entry))
-
-      // Add to severity-based sorted sets for quick queries
-      const severityKey = `${this.REDIS_KEY_PREFIX}severity:${entry.severity}`
-      await redisClient.zadd(severityKey, Date.now(), entry.id)
-
-      // Add to user-based sorted sets
-      if (entry.userId) {
-        const userKey = `${this.REDIS_KEY_PREFIX}user:${entry.userId}`
-        await redisClient.zadd(userKey, Date.now(), entry.id)
-      }
-
-      // Add to IP-based sorted sets for tracking
-      if (entry.ipAddress) {
-        const ipKey = `${this.REDIS_KEY_PREFIX}ip:${entry.ipAddress}`
-        await redisClient.zadd(ipKey, Date.now(), entry.id)
-      }
-
-    } catch (error) {
-      logger.error('Failed to store audit entry in Redis', { error, entryId: entry.id })
-    }
+    // Redis is disabled - audit entries are only stored in database
+    // This method is kept for compatibility but performs no operations
+    return;
   }
 
   /**
@@ -279,15 +253,9 @@ export class AuditLogger {
    * Trigger security alert
    */
   private static async triggerAlert(alertType: string, entry: AuditLogEntry): Promise<void> {
-    const alertKey = `${this.REDIS_KEY_PREFIX}alert:${alertType}:${entry.ipAddress || entry.userId}`
+    // Redis is disabled - alert cooldown is not enforced
+    // In production, consider implementing in-memory cooldown or database-based tracking
     
-    // Check if we've already alerted for this recently
-    const lastAlert = await redisClient.get(alertKey)
-    if (lastAlert) return
-
-    // Set alert cooldown
-    await redisClient.setex(alertKey, this.ALERT_COOLDOWN, Date.now().toString())
-
     // Log the alert
     logger.warn(`Security alert triggered: ${alertType}`, {
       alertType,

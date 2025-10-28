@@ -2,8 +2,6 @@
 
 import React, { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { useEvmAddress, useIsSignedIn } from '@coinbase/cdp-hooks'
-import { useCDPWallet } from '@/components/cdp-wallet-provider'
 import { useSession } from 'next-auth/react'
 import { Wallet, Loader2 } from 'lucide-react'
 import Link from 'next/link'
@@ -20,29 +18,11 @@ export function BaseSignInNavButton({
   size = 'sm'
 }: BaseSignInNavButtonProps) {
   const { data: session } = useSession()
-  const { isAvailable, isConfigured } = useCDPWallet()
-  const { evmAddress } = useEvmAddress()
-  const { isSignedIn } = useIsSignedIn()
   const [isLoading, setIsLoading] = useState(false)
 
-  // Don't render if CDP is not available or user is already signed in
-  if (!isAvailable || !isConfigured || session?.user) {
+  // Don't render if user is already signed in
+  if (session?.user) {
     return null
-  }
-
-  // If already connected with CDP, show connected state
-  if (isSignedIn && evmAddress) {
-    return (
-      <Button
-        variant="ghost"
-        size={size}
-        className={`${className} text-blue-600 hover:text-blue-700 hover:bg-blue-50`}
-        disabled
-      >
-        <Wallet className="mr-2 h-4 w-4" />
-        Base Connected
-      </Button>
-    )
   }
 
   return (

@@ -5,6 +5,7 @@ import { apiKeyRotationService } from '@/lib/api-key-rotation'
 import { logger } from '@/lib/logger'
 import { withErrorHandler, ValidationError, AuthenticationError } from '@/lib/error-handler'
 import { withCSRFProtection } from '@/lib/csrf-protection'
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils'
 
 interface RouteParams {
   params: {
@@ -19,11 +20,17 @@ export const POST = withCSRFProtection(async (request: NextRequest, { params }: 
   try {
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
+    }
+
+    // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+    const userId = await getAuthenticatedUserId(request)
+    if (!userId) {
+      return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 })
     }
 
     const { keyId } = params
@@ -36,7 +43,7 @@ export const POST = withCSRFProtection(async (request: NextRequest, { params }: 
     }
 
     // Verify key belongs to user
-    const existingKey = await apiKeyRotationService.getUserAPIKeys(session.user.id)
+    const existingKey = await apiKeyRotationService.getUserAPIKeys(userId)
     const keyExists = existingKey.find(key => key.id === keyId)
 
     if (!keyExists) {
@@ -49,7 +56,7 @@ export const POST = withCSRFProtection(async (request: NextRequest, { params }: 
     const rotationResult = await apiKeyRotationService.rotateAPIKey(keyId)
 
     logger.info('API key rotated via API', {
-      userId: session.user.id,
+      userId,
       oldKeyId: rotationResult.oldKeyId,
       newKeyId: rotationResult.newKeyId
     })
@@ -78,11 +85,17 @@ export const DELETE = withCSRFProtection(async (request: NextRequest, { params }
   try {
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
+    }
+
+    // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+    const userId = await getAuthenticatedUserId(request)
+    if (!userId) {
+      return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 })
     }
 
     const { keyId } = params
@@ -95,7 +108,7 @@ export const DELETE = withCSRFProtection(async (request: NextRequest, { params }
     }
 
     // Verify key belongs to user
-    const existingKeys = await apiKeyRotationService.getUserAPIKeys(session.user.id)
+    const existingKeys = await apiKeyRotationService.getUserAPIKeys(userId)
     const keyExists = existingKeys.find(key => key.id === keyId)
 
     if (!keyExists) {
@@ -108,7 +121,7 @@ export const DELETE = withCSRFProtection(async (request: NextRequest, { params }
     await apiKeyRotationService.revokeAPIKey(keyId)
 
     logger.info('API key revoked via API', {
-      userId: session.user.id,
+      userId,
       keyId,
       keyName: keyExists.name
     })

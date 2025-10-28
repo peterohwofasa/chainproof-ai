@@ -5,6 +5,7 @@ import { connectDB, ApiKey, Subscription, SubscriptionStatus } from '@/models'
 import { SecurityUtils } from '@/lib/security'
 import { withErrorHandler, AuthenticationError, ValidationError } from '@/lib/error-handler'
 import { withAuth, withRateLimit } from '@/lib/middleware'
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils'
 
 export const GET = withErrorHandler(async (request: NextRequest) => {
   // Authentication check
@@ -12,20 +13,26 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
   if (authResponse) return authResponse
   
   const session = await getServerSession(authOptions)
-  if (!session?.user?.id) {
+  if (!session?.user) {
     throw new AuthenticationError('Authentication required')
   }
 
-  // Rate limiting
-  const rateLimitResponse = await withRateLimit(request, session.user.id, 20, 60000) // 20 requests per minute
+  // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+  const userId = await getAuthenticatedUserId(request)
+  if (!userId) {
+    throw new AuthenticationError('Unable to authenticate user')
+  }
+
+  // Rate limiting - use wallet-authenticated user ID
+  const rateLimitResponse = await withRateLimit(request, userId, 20, 60000) // 20 requests per minute
   if (rateLimitResponse) return rateLimitResponse
 
   // Connect to MongoDB
   await connectDB()
 
-  // Get user's API keys
+  // Get user's API keys - support wallet authentication
   const apiKeys = await ApiKey.find({
-    userId: session.user.id,
+    userId,
     isActive: true
   })
   .select({
@@ -60,12 +67,18 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   if (authResponse) return authResponse
   
   const session = await getServerSession(authOptions)
-  if (!session?.user?.id) {
+  if (!session?.user) {
     throw new AuthenticationError('Authentication required')
   }
 
-  // Rate limiting
-  const rateLimitResponse = await withRateLimit(request, session.user.id, 5, 60000) // 5 requests per minute
+  // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+  const userId = await getAuthenticatedUserId(request)
+  if (!userId) {
+    throw new AuthenticationError('Unable to authenticate user')
+  }
+
+  // Rate limiting - use wallet-authenticated user ID
+  const rateLimitResponse = await withRateLimit(request, userId, 5, 60000) // 5 requests per minute
   if (rateLimitResponse) return rateLimitResponse
 
   // Parse request body
@@ -96,24 +109,29 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   // Connect to MongoDB
   await connectDB()
 
-  // Check user's subscription plan limits
+  // Check user's subscription plan limits - support wallet authentication
   const subscription = await Subscription.findOne({
-    userId: session.user.id,
+    userId,
     status: SubscriptionStatus.ACTIVE
   }).lean()
 
-  if (!subscription) {
+  // UNIVERSAL WALLET ACCESS: Wallet users get unlimited access
+  const isWalletUser = session.user.walletAddress && !session.user.id
+  if (!subscription && !isWalletUser) {
     throw new ValidationError('Active subscription required')
   }
 
   const existingApiKeys = await ApiKey.countDocuments({
-    userId: session.user.id,
+    userId,
     isActive: true
   })
 
-  const maxKeys = (subscription as any).plan === 'ENTERPRISE' ? 10 : (subscription as any).plan === 'PRO' ? 3 : 1
-  if (existingApiKeys >= maxKeys) {
-    throw new ValidationError(`Maximum API keys limit reached (${maxKeys})`)
+  // UNIVERSAL WALLET ACCESS: Wallet users get unlimited API keys
+  if (!isWalletUser) {
+    const maxKeys = (subscription as any).plan === 'ENTERPRISE' ? 10 : (subscription as any).plan === 'PRO' ? 3 : 1
+    if (existingApiKeys >= maxKeys) {
+      throw new ValidationError(`Maximum API keys limit reached (${maxKeys})`)
+    }
   }
 
   // Generate API key
@@ -121,9 +139,9 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   const keyPrefix = apiKey.substring(0, 8)
   const hashedKey = await SecurityUtils.hashPassword(apiKey)
 
-  // Create API key record
+  // Create API key record - support wallet authentication
   const apiKeyRecord = await ApiKey.create({
-    userId: session.user.id,
+    userId,
     name,
     keyHash: hashedKey,
     keyPrefix,

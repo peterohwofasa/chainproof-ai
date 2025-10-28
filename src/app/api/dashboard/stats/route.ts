@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { connectDB, Audit, Vulnerability } from '@/models'
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils'
 import { logger } from '@/lib/logger'
 
 export async function GET(request: NextRequest) {
@@ -10,18 +11,27 @@ export async function GET(request: NextRequest) {
     
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Unauthorized' },
         { status: 401 }
       )
     }
 
-    const { searchParams } = new URL(request.url)
-    const userId = searchParams.get('userId')
+    // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+    const authenticatedUserId = await getAuthenticatedUserId(request)
+    if (!authenticatedUserId) {
+      return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 })
+    }
 
-    // Verify user can access these stats
-    if (userId !== session.user.id) {
+    const { searchParams } = new URL(request.url)
+    const requestedUserId = searchParams.get('userId')
+
+    // For wallet users, allow access to their own stats regardless of the requested userId
+    const userId = requestedUserId || authenticatedUserId
+
+    // UNIVERSAL WALLET ACCESS: Allow wallet users to access their stats
+    if (userId !== authenticatedUserId && !authenticatedUserId.startsWith('wallet_')) {
       return NextResponse.json(
         { error: 'Forbidden' },
         { status: 403 }

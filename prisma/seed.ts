@@ -86,58 +86,48 @@ async function main() {
   const users = await Promise.all([
     prisma.user.create({
       data: {
-        id: 'user_1',
         email: 'alice@chainproof.ai',
         name: 'Alice Johnson',
         password: hashedPassword,
         walletAddress: '0x742d35Cc6634C0532925a3b8D4C0C8b3C2e1e1e1',
         emailVerified: true,
         lastLoginAt: new Date('2024-03-15'),
-        createdAt: new Date('2024-01-15'),
       }
     }),
     prisma.user.create({
       data: {
-        id: 'user_2',
         email: 'bob@devsecurity.com',
         name: 'Bob Smith',
         walletAddress: '0x8ba1f109551bD432803012645Hac136c22C57154',
         emailVerified: true,
         lastLoginAt: new Date('2024-03-14'),
-        createdAt: new Date('2024-02-01'),
       }
     }),
     prisma.user.create({
       data: {
-        id: 'user_3',
         email: 'carol@blockchain.dev',
         name: 'Carol Williams',
         walletAddress: '0x1234567890123456789012345678901234567890',
         emailVerified: true,
         lastLoginAt: new Date('2024-03-13'),
-        createdAt: new Date('2023-12-10'),
       }
     }),
     prisma.user.create({
       data: {
-        id: 'user_4',
         email: 'david@smartcontracts.io',
         name: 'David Brown',
         walletAddress: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
         emailVerified: true,
         lastLoginAt: new Date('2024-03-12'),
-        createdAt: new Date('2024-03-05'),
       }
     }),
     prisma.user.create({
       data: {
-        id: 'user_5',
         email: 'eve@defi.protocol',
         name: 'Eve Davis',
         walletAddress: '0x9876543210987654321098765432109876543210',
         emailVerified: true,
         lastLoginAt: new Date('2024-03-11'),
-        createdAt: new Date('2024-01-20'),
       }
     })
   ])

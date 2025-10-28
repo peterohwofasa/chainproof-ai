@@ -49,7 +49,7 @@ export default function QuickStart() {
                 </div>
                 <div className="flex items-center space-x-3">
                   <CheckCircle className="w-5 h-5 text-green-500" />
-                  <span className="text-gray-700 dark:text-gray-300">ChainProof account (free signup)</span>
+                  <span className="text-gray-700 dark:text-gray-300">Base wallet connection (free)</span>
                 </div>
                 <div className="flex items-center space-x-3">
                   <CheckCircle className="w-5 h-5 text-green-500" />
@@ -58,7 +58,7 @@ export default function QuickStart() {
               </div>
               <div className="mt-6">
                 <Button asChild>
-                  <Link href="/signup">
+                  <Link href="/login">
                     Create Free Account
                     <ArrowRight className="w-4 h-4 ml-2" />
                   </Link>
@@ -86,7 +86,7 @@ export default function QuickStart() {
                 <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
                   <h4 className="font-semibold mb-3">Sign Up Steps:</h4>
                   <ol className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-                    <li>1. Visit <code className="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">chainproof.ai/signup</code></li>
+                    <li>1. Visit <code className="bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">chainproof.ai/login</code></li>
                     <li>2. Enter your email and create a password</li>
                     <li>3. Verify your email address</li>
                     <li>4. Complete your profile</li>

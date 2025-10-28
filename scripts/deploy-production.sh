@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ChainProof AI Production Deployment Script
-# This script sets up the production environment with PostgreSQL and Redis
+# This script sets up the production environment with MongoDB and Redis
 
 set -e
 
@@ -20,13 +20,13 @@ fi
 
 # Create necessary directories
 echo "📁 Creating necessary directories..."
-mkdir -p data/postgres
+mkdir -p data/mongodb
 mkdir -p data/redis
 mkdir -p logs
 mkdir -p backups
 
 # Set proper permissions
-chmod 755 data/postgres
+chmod 755 data/mongodb
 chmod 755 data/redis
 chmod 755 logs
 chmod 755 backups
@@ -50,17 +50,18 @@ docker-compose -f docker-compose.production.yml down || true
 echo "🚀 Starting production environment..."
 docker-compose -f docker-compose.production.yml up -d
 
-# Wait for PostgreSQL to be ready
-echo "⏳ Waiting for PostgreSQL to be ready..."
+# Wait for MongoDB to be ready
+echo "⏳ Waiting for MongoDB to be ready..."
 sleep 10
 
-# Run database migrations
-echo "🗃️  Running database migrations..."
-docker-compose -f docker-compose.production.yml exec app npx prisma migrate deploy
-
-# Generate Prisma client
-echo "🔧 Generating Prisma client..."
-docker-compose -f docker-compose.production.yml exec app npx prisma generate
+# Test MongoDB connection
+echo "🗃️  Testing MongoDB connection..."
+docker-compose -f docker-compose.production.yml exec app node -e "
+const mongoose = require('mongoose');
+mongoose.connect(process.env.MONGODB_URI || process.env.DATABASE_URL)
+  .then(() => { console.log('✅ MongoDB connected successfully'); process.exit(0); })
+  .catch(err => { console.error('❌ MongoDB connection failed:', err); process.exit(1); });
+"
 
 # Check health status
 echo "🏥 Checking application health..."
@@ -93,14 +94,14 @@ echo ""
 echo "📋 Next Steps:"
 echo "1. Application is running at: http://localhost:3000"
 echo "2. Health check endpoint: http://localhost:3000/api/health"
-echo "3. PostgreSQL is running on port 5432"
+echo "3. MongoDB is running on port 27017"
 echo "4. Redis is running on port 6379"
 echo ""
 echo "📝 Useful Commands:"
 echo "- View logs: docker-compose -f docker-compose.production.yml logs -f"
 echo "- Stop services: docker-compose -f docker-compose.production.yml down"
 echo "- Restart services: docker-compose -f docker-compose.production.yml restart"
-echo "- Database backup: docker-compose -f docker-compose.production.yml exec postgres pg_dump -U chainproof_user chainproof_db > backup.sql"
+echo "- Database backup: docker-compose -f docker-compose.production.yml exec mongodb mongodump --db chainproof_db --out /data/backup"
 echo ""
 echo "🔒 Security Reminders:"
 echo "- Change default passwords in .env.production"

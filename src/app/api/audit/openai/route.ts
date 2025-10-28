@@ -10,6 +10,7 @@ import { withAuth, withRateLimit, sanitizeRequestBody } from '../../../../lib/mi
 import { addSecurityHeaders } from '../../../../lib/security'
 import { withErrorHandler, ValidationError, AuthenticationError, RateLimitError, ExternalServiceError } from '../../../../lib/error-handler'
 import { createBlockchainExplorer, detectNetwork, SUPPORTED_NETWORKS } from '../../../../lib/blockchain-explorer'
+import { getAuthenticatedUserId } from '../../../../lib/wallet-auth-utils' // UNIVERSAL WALLET ACCESS
 
 // SSE is now handled by utility functions
 // No need for global Socket.IO instance
@@ -24,12 +25,15 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   if (authResponse) return authResponse
   
   const session = await getServerSession(authOptions)
-  if (!session?.user?.id) {
+  if (!session?.user) {
     throw new AuthenticationError('Authentication required')
   }
 
+  // Get user ID from wallet authentication
+  const userId = await getAuthenticatedUserId(request)
+
   // Rate limiting - more restrictive for OpenAI agent calls
-  const rateLimitResponse = await withRateLimit(request, session.user.id, 5, 60000) // 5 requests per minute
+  const rateLimitResponse = await withRateLimit(request, userId, 5, 60000) // 5 requests per minute
   if (rateLimitResponse) return rateLimitResponse
 
   // Parse and validate request body
@@ -94,7 +98,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   }
 
   // Check user subscription status
-  const user = await User.findById(session.user.id).populate('subscription')
+  const user = await User.findById(userId).populate('subscription')
 
   if (!user || !user.subscription) {
     throw new ValidationError('No active subscription found. Please contact support.')
@@ -134,7 +138,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
 
   // Create audit record
   const audit = await Audit.create({
-    userId: session.user.id,
+    userId: userId,
     contractId: contract._id,
     status: 'PENDING',
     auditType: 'OPENAI_AGENT',

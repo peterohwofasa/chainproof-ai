@@ -645,26 +645,6 @@ export default function SettingsPage() {
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <Button 
-                      variant="outline" 
-                      onClick={async () => {
-                        try {
-                          const response = await fetch('/api/subscription/portal', {
-                            method: 'POST'
-                          })
-                          if (response.ok) {
-                            const { url } = await response.json()
-                            window.location.href = url
-                          } else {
-                            toast.error('Failed to open billing portal')
-                          }
-                        } catch (error) {
-                          toast.error('Failed to open billing portal')
-                        }
-                      }}
-                    >
-                      Manage Subscription
-                    </Button>
                     <Button onClick={() => window.location.href = '/pricing'}>
                       Upgrade Plan
                     </Button>
@@ -678,18 +658,16 @@ export default function SettingsPage() {
                       <div className="flex items-center gap-3">
                         <CreditCard className="w-5 h-5" />
                         <div>
-                          <p className="font-medium">•••• 4242</p>
-                          <p className="text-sm text-gray-500">Expires 12/25</p>
+                          <p className="font-medium">Base Pay (USDC)</p>
+                          <p className="text-sm text-gray-500">Payments processed on Base network</p>
                         </div>
                       </div>
-                      <Button variant="outline" size="sm">
-                        Update
-                      </Button>
+                      <Badge variant="secondary">Active</Badge>
                     </div>
                   </div>
-                  <Button variant="outline" className="w-full">
-                    Add Payment Method
-                  </Button>
+                  <p className="text-sm text-gray-500">
+                    All payments are processed securely through Base Pay using USDC on the Base network.
+                  </p>
                 </div>
 
                 <div className="space-y-4">

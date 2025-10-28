@@ -13,6 +13,7 @@ import { staticAnalyzer } from '../../../lib/static-analysis'
 import { vulnerabilityDatabase, VulnerabilityPattern } from '../../../lib/vulnerability-database'
 import { vulnerabilityCache } from '../../../lib/vulnerability-cache'
 import { AuditLogger, AuditEventType, AuditSeverity } from '../../../lib/audit-logging'
+import { getAuthenticatedUserId } from '../../../lib/wallet-auth-utils' // UNIVERSAL WALLET ACCESS
 
 // SSE is now handled by the utility functions
 // No need for global Socket.IO instance
@@ -28,12 +29,15 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   if (authResponse) return authResponse
   
   const session = await getServerSession(authOptions)
-  if (!session?.user?.id) {
+  if (!session?.user) {
     throw new AuthenticationError('Authentication required')
   }
 
+  // Get user ID from wallet authentication
+  const userId = await getAuthenticatedUserId(request)
+
   // Rate limiting
-  const rateLimitResponse = await withRateLimit(request, session.user.id, 10, 60000) // 10 requests per minute
+  const rateLimitResponse = await withRateLimit(request, userId, 10, 60000) // 10 requests per minute
   if (rateLimitResponse) return rateLimitResponse
 
   // Parse and validate request body
@@ -119,7 +123,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
 
   // Check user's subscription and free trial status
   const subscription = await Subscription.findOne({
-    userId: session.user.id,
+    userId: userId,
     status: SubscriptionStatus.ACTIVE
   })
 
@@ -162,7 +166,7 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
   // Create audit record
   const audit = await Audit.create({
     contractId: contract._id.toString(),
-    userId: session.user.id,
+    userId: userId,
     status: AuditStatus.RUNNING,
     startedAt: new Date(),
   })

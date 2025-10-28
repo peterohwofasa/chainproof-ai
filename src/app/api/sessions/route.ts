@@ -4,6 +4,7 @@ import { sessionManager } from '@/lib/session-manager';
 import { logger } from '@/lib/logger';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils';
 
 // GET /api/sessions - Get user's sessions or session stats (admin only)
 export const GET = withErrorHandler(async (request: NextRequest) => {
@@ -13,12 +14,18 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+  const authenticatedUserId = await getAuthenticatedUserId(request);
+  if (!authenticatedUserId) {
+    return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 });
+  }
+
   const url = new URL(request.url);
   const stats = url.searchParams.get('stats') === 'true';
   const userId = url.searchParams.get('userId');
 
   // Admin can get stats or other users' sessions
-  if (stats || (userId && userId !== session.user.id)) {
+  if (stats || (userId && userId !== authenticatedUserId)) {
     if (session.user.role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
@@ -34,12 +41,13 @@ export const GET = withErrorHandler(async (request: NextRequest) => {
     }
   }
 
-  // Get current user's sessions
-  const userSessions = await sessionManager.getUserSessions(session.user.id);
+  // Get current user's sessions - support wallet authentication
+  const userSessions = await sessionManager.getUserSessions(authenticatedUserId);
   
   logger.info('User sessions retrieved', {
-    userId: session.user.id,
-    sessionCount: userSessions.length
+    userId: authenticatedUserId,
+    sessionCount: userSessions.length,
+    isWalletUser: !!session.user.walletAddress
   });
 
   return NextResponse.json({ sessions: userSessions });
@@ -53,11 +61,17 @@ export const DELETE = withErrorHandler(async (request: NextRequest) => {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+  const authenticatedUserId = await getAuthenticatedUserId(request);
+  if (!authenticatedUserId) {
+    return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 });
+  }
+
   const body = await request.json();
   const { sessionId, userId, all } = body;
 
   // Admin can destroy any user's sessions
-  if (userId && userId !== session.user.id) {
+  if (userId && userId !== authenticatedUserId) {
     if (session.user.role !== 'admin') {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
@@ -65,7 +79,7 @@ export const DELETE = withErrorHandler(async (request: NextRequest) => {
     if (all) {
       const destroyedCount = await sessionManager.destroyUserSessions(userId);
       logger.info('Admin destroyed all user sessions', {
-        adminId: session.user.id,
+        adminId: authenticatedUserId,
         targetUserId: userId,
         destroyedCount
       });
@@ -76,12 +90,13 @@ export const DELETE = withErrorHandler(async (request: NextRequest) => {
     }
   }
 
-  // Destroy all sessions for current user
+  // Destroy all sessions for current user - support wallet authentication
   if (all) {
-    const destroyedCount = await sessionManager.destroyUserSessions(session.user.id);
+    const destroyedCount = await sessionManager.destroyUserSessions(authenticatedUserId);
     logger.info('User destroyed all their sessions', {
-      userId: session.user.id,
-      destroyedCount
+      userId: authenticatedUserId,
+      destroyedCount,
+      isWalletUser: !!session.user.walletAddress
     });
     return NextResponse.json({ 
       message: `Destroyed ${destroyedCount} sessions`,
@@ -94,7 +109,7 @@ export const DELETE = withErrorHandler(async (request: NextRequest) => {
     // Verify user owns the session (unless admin)
     if (session.user.role !== 'admin') {
       const sessionData = await sessionManager.getSession(sessionId);
-      if (!sessionData || sessionData.userId !== session.user.id) {
+      if (!sessionData || sessionData.userId !== authenticatedUserId) {
         return NextResponse.json({ error: 'Session not found' }, { status: 404 });
       }
     }
@@ -102,8 +117,9 @@ export const DELETE = withErrorHandler(async (request: NextRequest) => {
     const success = await sessionManager.destroySession(sessionId);
     if (success) {
       logger.info('Session destroyed', {
-        userId: session.user.id,
-        sessionId
+        userId: authenticatedUserId,
+        sessionId,
+        isWalletUser: !!session.user.walletAddress
       });
       return NextResponse.json({ message: 'Session destroyed' });
     } else {
@@ -122,6 +138,12 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+  const authenticatedUserId = await getAuthenticatedUserId(request);
+  if (!authenticatedUserId) {
+    return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 });
+  }
+
   const body = await request.json();
   const { sessionId, action, metadata } = body;
 
@@ -131,9 +153,9 @@ export const POST = withErrorHandler(async (request: NextRequest) => {
     }, { status: 400 });
   }
 
-  // Verify user owns the session
+  // Verify user owns the session - support wallet authentication
   const sessionData = await sessionManager.getSession(sessionId);
-  if (!sessionData || sessionData.userId !== session.user.id) {
+  if (!sessionData || sessionData.userId !== authenticatedUserId) {
     return NextResponse.json({ error: 'Session not found' }, { status: 404 });
   }
 

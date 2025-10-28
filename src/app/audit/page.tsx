@@ -14,11 +14,12 @@ import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Upload, FileText, Link2, AlertCircle, CheckCircle2, Shield, Code, Zap, Clock, Activity, Coins, Globe } from 'lucide-react'
+import { Upload, FileText, Link2, AlertCircle, CheckCircle2, Shield, Code, Zap, Clock, Activity, Coins, Globe, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuditProgress } from '@/hooks/use-audit-progress'
 import { AuditCompletion } from '@/components/audit-completion'
 import { AuditProgress } from '@/components/audit-progress'
+import { AuditCompleteModal } from '@/components/audit/audit-complete-modal'
 
 // Type definition for audit results
 interface AuditData {
@@ -68,7 +69,7 @@ interface AuditData {
 
 function AuditPageContent() {
   const { data: session, status } = useSession()
-  const { user, refreshUser } = useAuth()
+  const { user: authUser, refreshUser, canSaveOrExport } = useAuth()
   const router = useRouter()
   const [contractCode, setContractCode] = useState('')
   const [contractAddress, setContractAddress] = useState('')
@@ -115,10 +116,11 @@ contract VulnerableToken is ERC20, Ownable {
 }`
 
   useEffect(() => {
-    if (status === 'unauthenticated') {
+    // Allow access if user is authenticated via NextAuth
+    if (status === 'unauthenticated' && !authUser) {
       router.push('/login')
     }
-  }, [status, router])
+  }, [status, router, authUser])
 
   useEffect(() => {
     if (auditId && isConnected) {
@@ -136,10 +138,18 @@ contract VulnerableToken is ERC20, Ownable {
       setIsAuditing(false)
       toast.success('Audit completed successfully!')
       
-      // Show completion modal instead of immediate redirect
-      setTimeout(() => {
-        setShowCompletionModal(true)
-      }, 2000) // Allow time to see 100% progress
+      // Fetch the full audit result
+      if (auditId) {
+        fetchFullAuditReport(auditId).then(reportData => {
+          if (reportData) {
+            setAuditResult(reportData.audit)
+            // Show completion modal
+            setTimeout(() => {
+              setShowCompletionModal(true)
+            }, 1000)
+          }
+        })
+      }
     }
     if (progress && progress.status === 'ERROR') {
       setIsAuditing(false)
@@ -171,20 +181,22 @@ contract VulnerableToken is ERC20, Ownable {
     }
 
     // Check if user has credits or is on a valid free trial
-    const creditsRemaining = user?.subscription?.creditsRemaining || 0
-    const isFreeTrial = user?.subscription?.isFreeTrial || false
-    const freeTrialEnds = user?.subscription?.freeTrialEnds
-    
-    // Check if free trial is still valid
-    const isValidFreeTrial = isFreeTrial && freeTrialEnds && new Date(freeTrialEnds) > new Date()
-    
-    // DEVELOPMENT/TESTING BYPASS: Allow audits for testing purposes
-    const isDevelopment = process.env.NODE_ENV === 'development'
-    const allowTesting = true // Temporarily disabled for testing - isDevelopment || process.env.NEXT_PUBLIC_BYPASS_CREDIT_CHECK === 'true'
-    
-    if (!allowTesting && creditsRemaining <= 0 && !isValidFreeTrial) {
-      toast.error('Insufficient credits. Please upgrade your plan or start your free trial.')
-      return
+    if (canSaveOrExport) {
+      const creditsRemaining = authUser?.subscription?.creditsRemaining || 0
+      const isFreeTrial = authUser?.subscription?.isFreeTrial || false
+      const freeTrialEnds = authUser?.subscription?.freeTrialEnds
+      
+      // Check if free trial is still valid
+      const isValidFreeTrial = isFreeTrial && freeTrialEnds && new Date(freeTrialEnds) > new Date()
+      
+      // DEVELOPMENT/TESTING BYPASS: Allow audits for testing purposes
+      const isDevelopment = process.env.NODE_ENV === 'development'
+      const allowTesting = true // Temporarily disabled for testing - isDevelopment || process.env.NEXT_PUBLIC_BYPASS_CREDIT_CHECK === 'true'
+      
+      if (!allowTesting && creditsRemaining <= 0 && !isValidFreeTrial) {
+        toast.error('Insufficient credits. Please upgrade your plan or start your free trial.')
+        return
+      }
     }
 
     setIsAuditing(true)
@@ -265,13 +277,29 @@ contract VulnerableToken is ERC20, Ownable {
     )
   }
 
-  if (!session) {
+  // Only block access if user is not authenticated
+  if (!session && !authUser) {
     return null // Will redirect to login
   }
 
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="max-w-4xl mx-auto">
+        {/* Audit Complete Modal */}
+        {showCompletionModal && auditResult && auditId && (
+          <AuditCompleteModal
+            open={showCompletionModal}
+            onOpenChange={setShowCompletionModal}
+            auditId={auditId}
+            contractName={auditResult.contractName || contractName || 'Unknown Contract'}
+            overallScore={auditResult.overallScore || 0}
+            riskLevel={auditResult.riskLevel || 'UNKNOWN'}
+            vulnerabilitiesCount={auditResult.vulnerabilities?.length || 0}
+          />
+        )}
+
+        {/* Fallback Mode Notice - removed as feature not implemented */}
+
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">
             Smart Contract Audit
@@ -288,8 +316,8 @@ contract VulnerableToken is ERC20, Ownable {
             )}
             <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
               <Coins className="w-3 h-3 mr-1" />
-              {user?.subscription?.creditsRemaining || 0} credits remaining
-              {user?.subscription?.isFreeTrial && (
+              {authUser?.subscription?.creditsRemaining || 0} credits remaining
+              {authUser?.subscription?.isFreeTrial && (
                 <span className="ml-1 text-xs">(Free Trial)</span>
               )}
             </Badge>
@@ -297,7 +325,7 @@ contract VulnerableToken is ERC20, Ownable {
         </div>
 
         {auditResult && progress?.status === 'COMPLETED' ? (
-          <AuditResults result={auditResult} onNewAudit={() => {
+          <AuditResults result={auditResult} canSaveOrExport={canSaveOrExport} onNewAudit={() => {
             setAuditResult(null)
             setAuditId(null)
             setContractCode('')
@@ -427,9 +455,9 @@ contract VulnerableToken is ERC20, Ownable {
               )}
 
               {(() => {
-                const creditsRemaining = user?.subscription?.creditsRemaining || 0
-                const isFreeTrial = user?.subscription?.isFreeTrial || false
-                const freeTrialEnds = user?.subscription?.freeTrialEnds
+                const creditsRemaining = authUser?.subscription?.creditsRemaining || 0
+                const isFreeTrial = authUser?.subscription?.isFreeTrial || false
+                const freeTrialEnds = authUser?.subscription?.freeTrialEnds
                 const isValidFreeTrial = isFreeTrial && freeTrialEnds && new Date(freeTrialEnds) > new Date()
                 
                 // DEVELOPMENT/TESTING BYPASS: Don't show credit warning during testing
@@ -452,9 +480,9 @@ contract VulnerableToken is ERC20, Ownable {
               <Button 
                 onClick={handleStartAudit}
                 disabled={(() => {
-                  const creditsRemaining = user?.subscription?.creditsRemaining || 0
-                  const isFreeTrial = user?.subscription?.isFreeTrial || false
-                  const freeTrialEnds = user?.subscription?.freeTrialEnds
+                  const creditsRemaining = authUser?.subscription?.creditsRemaining || 0
+                  const isFreeTrial = authUser?.subscription?.isFreeTrial || false
+                  const freeTrialEnds = authUser?.subscription?.freeTrialEnds
                   const isValidFreeTrial = isFreeTrial && freeTrialEnds && new Date(freeTrialEnds) > new Date()
                   
                   // DEVELOPMENT/TESTING BYPASS: Don't disable button during testing
@@ -514,7 +542,37 @@ export default function AuditPage() {
   )
 }
 
-function AuditResults({ result, onNewAudit }: { result: AuditData, onNewAudit: () => void }) {
+function AuditResults({ result, onNewAudit, canSaveOrExport }: { result: AuditData, onNewAudit: () => void, canSaveOrExport: boolean }) {
+  const [isDownloadingPDF, setIsDownloadingPDF] = useState(false)
+
+  const handleDownloadPDF = async () => {
+    setIsDownloadingPDF(true)
+    try {
+      const response = await fetch(`/api/audit/report/pdf/${result.id}`)
+      
+      if (!response.ok) {
+        throw new Error('Failed to generate PDF report')
+      }
+
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `chainproof-audit-report-${result.contractName}-${result.id}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+      
+      toast.success('PDF report downloaded successfully!')
+    } catch (error) {
+      console.error('Error downloading PDF:', error)
+      toast.error('Failed to download PDF report')
+    } finally {
+      setIsDownloadingPDF(false)
+    }
+  }
+
   const getSeverityColor = (severity: string) => {
     switch (severity) {
       case 'CRITICAL': return 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300'
@@ -646,18 +704,44 @@ function AuditResults({ result, onNewAudit }: { result: AuditData, onNewAudit: (
             <Button onClick={onNewAudit} variant="outline">
               Audit Another Contract
             </Button>
-            <Button onClick={() => {
-              const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' })
-              const url = URL.createObjectURL(blob)
-              const a = document.createElement('a')
-              a.href = url
-              a.download = `audit-report-${Date.now()}.json`
-              document.body.appendChild(a)
-              a.click()
-              document.body.removeChild(a)
-              URL.revokeObjectURL(url)
-            }}>
-              Download Full Report
+            <Button 
+              onClick={handleDownloadPDF}
+              disabled={!canSaveOrExport || isDownloadingPDF}
+              className="flex items-center gap-2"
+            >
+              {isDownloadingPDF ? (
+                <>
+                  <Clock className="w-4 h-4 animate-spin" />
+                  Generating PDF...
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4" />
+                  Download PDF Report
+                </>
+              )}
+            </Button>
+            <Button 
+              onClick={() => {
+                if (!canSaveOrExport) {
+                  toast.error('Download functionality is not available in demo mode. Please sign in with a full account to download reports.')
+                  return
+                }
+                const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `audit-report-${Date.now()}.json`
+                document.body.appendChild(a)
+                a.click()
+                document.body.removeChild(a)
+                URL.revokeObjectURL(url)
+              }}
+              disabled={!canSaveOrExport}
+              variant="outline"
+            >
+              <FileText className="w-4 h-4 mr-2" />
+              Download JSON
             </Button>
           </div>
         </CardContent>

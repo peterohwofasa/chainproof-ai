@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { withAuth } from '@/lib/middleware';
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils';
 import { logger } from '@/lib/logger';
 import connectDB from '@/lib/mongodb';
 import { Audit } from '@/models';
@@ -14,8 +15,14 @@ export async function GET(
   try {
     // Verify authentication
     const session = await getServerSession(authOptions);
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return new NextResponse('Unauthorized', { status: 401 });
+    }
+
+    // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+    const userId = await getAuthenticatedUserId(request);
+    if (!userId) {
+      return new NextResponse('Unable to authenticate user', { status: 401 });
     }
 
     const { auditId } = params;
@@ -23,10 +30,10 @@ export async function GET(
     // Connect to database
     await connectDB();
     
-    // Verify user has access to this audit
+    // Verify user has access to this audit - support both MongoDB ObjectId and wallet address
     const audit = await Audit.findOne({
       _id: auditId,
-      userId: session.user.id
+      userId: userId
     });
 
     if (!audit) {
@@ -63,12 +70,20 @@ export async function GET(
           controller.enqueue(`data: ${statusData}\n\n`);
         }
 
-        logger.info('SSE connection established', { auditId, userId: session.user.id });
+        logger.info('SSE connection established - UNIVERSAL WALLET ACCESS', { 
+          auditId, 
+          userId,
+          isWalletUser: userId.startsWith('wallet_')
+        });
       },
       cancel() {
         // Remove connection using utility function
         removeSSEConnection(auditId, streamController);
-        logger.info('SSE connection closed', { auditId, userId: session.user.id });
+        logger.info('SSE connection closed - UNIVERSAL WALLET ACCESS', { 
+          auditId, 
+          userId,
+          isWalletUser: userId.startsWith('wallet_')
+        });
       }
     });
 

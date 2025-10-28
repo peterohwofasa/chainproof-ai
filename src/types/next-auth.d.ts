@@ -8,6 +8,9 @@ declare module 'next-auth' {
       email: string;
       name?: string | null;
       image?: string | null;
+      isBaseAccount?: boolean;
+      onlineStatus?: 'online' | 'offline' | 'away';
+      walletAddress?: string;
     };
   }
 
@@ -16,6 +19,9 @@ declare module 'next-auth' {
     email: string;
     name?: string | null;
     emailVerified?: Date | null;
+    isBaseAccount?: boolean;
+    onlineStatus?: 'online' | 'offline' | 'away';
+    walletAddress?: string;
   }
 }
 
@@ -24,5 +30,8 @@ declare module 'next-auth/jwt' {
     id: string;
     email: string;
     name?: string | null;
+    isBaseAccount?: boolean;
+    onlineStatus?: 'online' | 'offline' | 'away';
+    walletAddress?: string;
   }
 }

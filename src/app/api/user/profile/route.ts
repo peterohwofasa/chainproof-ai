@@ -3,25 +3,29 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { connectDB, User } from '@/models'
 import { SecurityUtils } from '@/lib/security'
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils' // UNIVERSAL WALLET ACCESS
 
 export async function GET(request: NextRequest) {
   try {
     await connectDB()
     
-    const session = await getServerSession(authOptions)
+    // Get user ID from wallet authentication
+    const userId = await getAuthenticatedUserId(request)
     
-    if (!session?.user?.id) {
+    if (!userId) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
     }
 
-    const user = await User.findById(session.user.id)
+    const user = await User.findById(userId)
       .select({
         _id: 1,
         email: 1,
         name: 1,
+        walletAddress: 1,
+        isBaseAccount: 1,
         createdAt: 1,
         lastLoginAt: 1,
         bio: 1,
@@ -43,6 +47,8 @@ export async function GET(request: NextRequest) {
       id: user._id.toString(),
       email: user.email,
       name: user.name,
+      walletAddress: user.walletAddress,
+      isBaseAccount: user.isBaseAccount,
       createdAt: user.createdAt,
       lastLoginAt: user.lastLoginAt,
       bio: user.bio,
@@ -51,9 +57,9 @@ export async function GET(request: NextRequest) {
       location: user.location
     }
 
-    return NextResponse.json({ user: transformedUser })
+    return NextResponse.json(transformedUser)
   } catch (error) {
-    console.error('Profile fetch error:', error)
+    console.error('Error fetching user profile:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }
@@ -65,9 +71,10 @@ export async function PUT(request: NextRequest) {
   try {
     await connectDB()
     
-    const session = await getServerSession(authOptions)
+    // Get user ID from wallet authentication
+    const userId = await getAuthenticatedUserId(request)
     
-    if (!session?.user?.id) {
+    if (!userId) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
@@ -75,68 +82,36 @@ export async function PUT(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { name, bio, company, website, location } = body
-
-    // Validate and sanitize inputs
-    const sanitizedData = {
-      name: name ? SecurityUtils.validateInput(name, {
-        type: 'string',
-        required: true,
-        maxLength: 100,
-        sanitize: true,
-        checkXSS: true
-      }) : undefined,
-      bio: bio ? SecurityUtils.validateInput(bio, {
-        type: 'string',
-        maxLength: 500,
-        sanitize: true,
-        checkXSS: true
-      }) : undefined,
-      company: company ? SecurityUtils.validateInput(company, {
-        type: 'string',
-        maxLength: 100,
-        sanitize: true,
-        checkXSS: true
-      }) : undefined,
-      website: website ? SecurityUtils.validateInput(website, {
-        type: 'string',
-        maxLength: 255,
-        sanitize: true,
-        checkXSS: true
-      }) : undefined,
-      location: location ? SecurityUtils.validateInput(location, {
-        type: 'string',
-        maxLength: 100,
-        sanitize: true,
-        checkXSS: true
-      }) : undefined
+    
+    // Validate and sanitize input
+    const allowedFields = ['name', 'bio', 'company', 'website', 'location']
+    const updateData: any = {}
+    
+    for (const field of allowedFields) {
+      if (body[field] !== undefined) {
+        updateData[field] = SecurityUtils.sanitizeInput(body[field])
+      }
     }
 
-    // Remove undefined values
-    const updateData = Object.fromEntries(
-      Object.entries(sanitizedData).filter(([_, value]) => value !== undefined)
-    )
-
-    const updatedUser = await User.findByIdAndUpdate(
-      session.user.id,
+    const user = await User.findByIdAndUpdate(
+      userId,
       updateData,
-      { 
-        new: true,
-        select: {
-          _id: 1,
-          email: 1,
-          name: 1,
-          createdAt: 1,
-          updatedAt: 1,
-          bio: 1,
-          company: 1,
-          website: 1,
-          location: 1
-        }
-      }
-    ).lean()
+      { new: true, runValidators: true }
+    ).select({
+      _id: 1,
+      email: 1,
+      name: 1,
+      walletAddress: 1,
+      isBaseAccount: 1,
+      createdAt: 1,
+      lastLoginAt: 1,
+      bio: 1,
+      company: 1,
+      website: 1,
+      location: 1
+    }).lean()
 
-    if (!updatedUser) {
+    if (!user) {
       return NextResponse.json(
         { error: 'User not found' },
         { status: 404 }
@@ -145,20 +120,22 @@ export async function PUT(request: NextRequest) {
 
     // Transform _id to id for frontend compatibility
     const transformedUser = {
-      id: updatedUser._id.toString(),
-      email: updatedUser.email,
-      name: updatedUser.name,
-      createdAt: updatedUser.createdAt,
-      updatedAt: updatedUser.updatedAt,
-      bio: updatedUser.bio,
-      company: updatedUser.company,
-      website: updatedUser.website,
-      location: updatedUser.location
+      id: user._id.toString(),
+      email: user.email,
+      name: user.name,
+      walletAddress: user.walletAddress,
+      isBaseAccount: user.isBaseAccount,
+      createdAt: user.createdAt,
+      lastLoginAt: user.lastLoginAt,
+      bio: user.bio,
+      company: user.company,
+      website: user.website,
+      location: user.location
     }
 
-    return NextResponse.json({ user: transformedUser })
+    return NextResponse.json(transformedUser)
   } catch (error) {
-    console.error('Profile update error:', error)
+    console.error('Error updating user profile:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

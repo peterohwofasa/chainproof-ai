@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import connectDB from '@/lib/mongodb'
 import { Subscription } from '@/models'
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils'
 
 export async function POST(request: NextRequest) {
   try {
@@ -10,12 +11,16 @@ export async function POST(request: NextRequest) {
     
     const session = await getServerSession(authOptions)
     
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json(
         { error: 'Authentication required' },
         { status: 401 }
       )
     }
+
+    // Get authenticated user ID (supports both traditional and wallet users)
+    const userId = await getAuthenticatedUserId(request)
+    const isWalletUser = !session.user.id
 
     const body = await request.json()
     const { provider, domain, entityId, ssoUrl, certificate } = body
@@ -29,11 +34,12 @@ export async function POST(request: NextRequest) {
 
     // Validate user has enterprise permissions
     const userSubscription = await Subscription.findOne(
-      { userId: session.user.id },
+      { userId },
       { plan: 1 }
     ).lean()
 
-    if ((userSubscription as any)?.plan !== 'ENTERPRISE') {
+    // UNIVERSAL WALLET ACCESS: Wallet users get enterprise features
+    if (!isWalletUser && (userSubscription as any)?.plan !== 'ENTERPRISE') {
       return NextResponse.json(
         { error: 'SSO is only available for enterprise plans' },
         { status: 403 }

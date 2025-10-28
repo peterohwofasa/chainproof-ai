@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 import { connectDB, Vulnerability, Audit, Contract } from '@/models'
+import { getAuthenticatedUserId } from '@/lib/wallet-auth-utils'
 import { z } from 'zod'
 
 const createVulnerabilitySchema = z.object({
@@ -20,8 +21,14 @@ export async function GET(request: NextRequest) {
     await connectDB()
     
     const session = await getServerSession(authOptions)
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+    const userId = await getAuthenticatedUserId(request)
+    if (!userId) {
+      return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 })
     }
 
     const { searchParams } = new URL(request.url)
@@ -34,8 +41,8 @@ export async function GET(request: NextRequest) {
 
     const skip = (page - 1) * limit
 
-    // Build filter clause based on user's audits
-    const userAudits = await Audit.find({ userId: session.user.id })
+    // Build filter clause based on user's audits - support wallet authentication
+    const userAudits = await Audit.find({ userId })
       .select('_id')
       .lean()
 
@@ -147,17 +154,23 @@ export async function POST(request: NextRequest) {
     await connectDB()
     
     const session = await getServerSession(authOptions)
-    if (!session?.user?.id) {
+    if (!session?.user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    // UNIVERSAL WALLET ACCESS: Get user ID supporting wallet authentication
+    const userId = await getAuthenticatedUserId(request)
+    if (!userId) {
+      return NextResponse.json({ error: 'Unable to authenticate user' }, { status: 401 })
     }
 
     const body = await request.json()
     const validatedData = createVulnerabilitySchema.parse(body)
 
-    // Verify audit access
+    // Verify audit access - support wallet authentication
     const audit = await Audit.findOne({
       _id: validatedData.auditId,
-      userId: session.user.id,
+      userId,
     })
 
     if (!audit) {
